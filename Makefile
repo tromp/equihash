@@ -1,6 +1,6 @@
 OPT = -O3
 FLAGS = -Wall -Wno-deprecated-declarations -D_POSIX_C_SOURCE=200112L $(OPT) -pthread 
-GPP = g++ -march=native -m64 -maes -mavx -std=c++11 $(FLAGS)
+GPP = g++ -march=native -m64 -std=c++11 $(FLAGS)
 
 all:	equi equi1 faster faster1 verify test spark
 
