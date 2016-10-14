@@ -207,6 +207,9 @@ struct equi {
   ~equi() {
     free(nslots);
     free(sols);
+#ifdef JOINHT
+    hta.dealloctrees();
+#endif
   }
   void setnonce(const char *header, u32 nonce) {
     setheader(&blake_ctx, header, nonce);
@@ -581,7 +584,9 @@ void *worker(void *vp) {
   barrier(&eq->barry);
   if (tp->id == 0) {
     eq->hta.dealloc_ht(WK-1);
+#ifndef JOINHT
     eq->hta.dealloctrees();
+#endif
   }
   pthread_exit(NULL);
   return 0;
