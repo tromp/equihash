@@ -2,7 +2,7 @@ OPT = -O3
 FLAGS = -Wall -Wno-deprecated-declarations -D_POSIX_C_SOURCE=200112L $(OPT) -pthread 
 GPP = g++ -march=native -m64 -maes -mavx -std=c++11 $(FLAGS)
 
-all:	equi equi1 faster faster1 verify test
+all:	equi equi1 faster faster1 verify test spark
 
 equi:	equi.h equi_miner.h equi_miner.cpp Makefile
 	$(GPP) -DATOMIC equi_miner.cpp blake/blake2b.cpp -o equi
@@ -42,3 +42,9 @@ bench:	equi
 
 test:	equi verify Makefile
 	time ./equi -h "" -n 0 -t 1 -s | grep ^Sol | ./verify -h "" -n 0
+
+spark:	equi1
+	time ./equi1
+
+clean:	
+	rm equi equi1 equi1g faster faster1 equi965 equi1445 eqcuda eqcuda1445 feqcuda verify
