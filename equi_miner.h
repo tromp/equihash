@@ -1,5 +1,5 @@
 // Equihash solver
-// Copyright (c) 2013-2016 John Tromp
+// Copyright (c) 2016 John Tromp
 
 // Fix N, K, such that n = N/(k+1) is integer
 // Fix M = 2^{n+1} hashes each of length N bits,

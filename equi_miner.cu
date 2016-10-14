@@ -1,5 +1,5 @@
 // Equihash CUDA solver
-// Copyright (c) 2013-2016 John Tromp
+// Copyright (c) 2016 John Tromp
 
 #include "equi.h"
 #include <stdio.h>
