@@ -1,6 +1,7 @@
 # equihash
 Equihash proof-of-work solvers
 
+Build with "make all"
 
 The executables ending in 1 are compiled without atomics and thus
 only suitable for single-threaded use (where they get some speedup over the generic version).
