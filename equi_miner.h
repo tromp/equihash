@@ -378,7 +378,9 @@ struct equi {
         const uchar *ph = hash + i * WN/8;
 #if BUCKBITS == 16 && RESTBITS == 4
         const u32 bucketid = ((u32)ph[0] << 8) | ph[1];
+#ifndef XWITHASH
         const u32 xhash = ph[2] >> 4;
+#endif
 #elif BUCKBITS == 20 && RESTBITS == 4
         const u32 bucketid = ((((u32)ph[0] << 8) | ph[1]) << 4) | ph[2] >> 4;
 #ifndef XWITHASH
@@ -429,6 +431,10 @@ struct equi {
           u32 xorbucketid;
           u32 xhash;
 #if BUCKBITS == 16 && RESTBITS == 4
+#ifdef XWITHASH
+          xhash = hash0->bytes[htl.prevbo+2] ^ hash1->bytes[htl.prevbo+2];
+#error not yet implemented
+#else
           xorbucketid = ((u32)(hash0->bytes[htl.prevbo]^hash1->bytes[htl.prevbo]) << 8)
             | (hash0->bytes[htl.prevbo+1]^hash1->bytes[htl.prevbo+1]);
           xhash = hash0->bytes[htl.prevbo+2] ^ hash1->bytes[htl.prevbo+2];
@@ -436,6 +442,7 @@ struct equi {
             xorbucketid = ((xorbucketid & 0xfff) << 4) | (xhash >> 4);
             xhash &= 0xf;
           } else xhash >>= 4;
+#endif
 #elif BUCKBITS == 20 && RESTBITS == 4 && defined XWITHASH
           xhash = hash0->bytes[htl.prevbo+3] ^ hash1->bytes[htl.prevbo+3];
           xorbucketid = ((((u32)(hash0->bytes[htl.prevbo+1]^hash1->bytes[htl.prevbo+1]) << 8) | (hash0->bytes[htl.prevbo+2]^hash1->bytes[htl.prevbo+2])) << 4) | xhash >> 4;
