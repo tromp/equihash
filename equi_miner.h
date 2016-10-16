@@ -92,6 +92,7 @@ union htunit {
 typedef htunit bucket[NSLOTS];
 // the N-bit hash consists of K+1 n-bit "digits"
 // each of which corresponds to a layer of NBUCKETS buckets
+typedef bucket digit[NBUCKETS];
 
 // size (in bytes) of hash in round 0 <= r < WK
 u32 hashsize(const u32 r) {
@@ -124,9 +125,14 @@ u32 slotsize(const u32 r) {
 
 // manages hash and tree data
 struct htalloc {
+// Defining JOINHT joins each tree with its corresponding hash,
+// so they may share a cache line. This gives a small speed
+// advantage but comes at the cost of a big memory increase
+// as hash-space can no longer be reclaimed
 #ifdef JOINHT
   htunit *trees[WK];
 #else
+  digit *heap;
   bucket *trees[WK];
   htunit *hashes[WK];
 #endif
@@ -138,6 +144,25 @@ struct htalloc {
 #ifdef JOINHT
     for (int r=0; r<WK; r++)
       trees[r] = (htunit *)alloc(NBUCKETS * NSLOTS * (1 + htunits(hashsize(r))), sizeof(htunit));
+#else
+// optimize xenoncat's fixed memory layout, avoiding any waste
+// digit trees         hashes        trees
+// 0         0 A A A A A A . . . . . .
+// 1         0 A A A A A A B B B B B 1
+// 2         0 2 C C C C C B B B B B 1
+// 3         0 2 C C C C C D D D D 3 1
+// 4         0 2 4 E E E E D D D D 3 1
+// 5         0 2 4 E E E E F F F 5 3 1
+// 6         0 2 4 6 . G G F F F 5 3 1
+// 7         0 2 4 6 . G G H H 7 5 3 1
+// 8         0 2 4 6 8 . I H H 7 5 3 1
+    assert(DIGITBITS >= 16); // ensures hashes shorten by 1 unit every 2 digits
+    u32 units0 = htunits(hashsize(0)), units1 = htunits(hashsize(1));
+    heap = (digit *)alloc(1+units0+units1+1, sizeof(digit));
+    for (int r=0; r<WK; r++) {
+      trees[r]  = (bucket *)(heap + (r&1 ? 1+units0+units1-r/2 :   r/2));
+      hashes[r] = (htunit *)(heap + (r&1 ? 1+units0            : 1+r/2));
+    }
 #endif
   }
   void dealloctrees() {
@@ -145,19 +170,8 @@ struct htalloc {
     for (int r=0; r<WK; r++)
       dealloc(trees[r], NBUCKETS * NSLOTS * (1 + htunits(hashsize(r))), sizeof(htunit));
 #else
-    for (int r=0; r<WK; r++)
-      dealloc(trees[r], NBUCKETS, sizeof(bucket));
-#endif
-  }
-  void alloc_ht(u32 r) {
-#ifndef JOINHT
-    hashes[r] = (htunit *)alloc(NBUCKETS * NSLOTS * htunits(hashsize(r)), sizeof(htunit));
-    trees[r] = (bucket *)alloc(NBUCKETS, sizeof(bucket));
-#endif
-  }
-  void dealloc_ht(u32 r) {
-#ifndef JOINHT
-    dealloc(hashes[r], NBUCKETS * NSLOTS * htunits(hashsize(r)), sizeof(htunit));
+    u32 units0 = htunits(hashsize(0)), units1 = htunits(hashsize(1));
+    dealloc(heap, 1+units0+units1+1, sizeof(digit));
 #endif
   }
   htunit *getbucket(u32 r, u32 bid) const {
@@ -197,6 +211,7 @@ struct equi {
   u32 bfull;
   pthread_barrier_t barry;
   equi(const u32 n_threads) {
+    assert(sizeof(htunit) == 4);
     nthreads = n_threads;
     const int err = pthread_barrier_init(&barry, NULL, nthreads);
     assert(!err);
@@ -205,11 +220,9 @@ struct equi {
     sols = (proof *)hta.alloc(MAXSOLS, sizeof(proof));
   }
   ~equi() {
+    hta.dealloctrees();
     free(nslots);
     free(sols);
-#ifdef JOINHT
-    hta.dealloctrees();
-#endif
   }
   void setnonce(const char *header, u32 nonce) {
     setheader(&blake_ctx, header, nonce);
@@ -550,10 +563,8 @@ void *worker(void *vp) {
   thread_ctx *tp = (thread_ctx *)vp;
   equi *eq = tp->eq;
 
-  if (tp->id == 0) {
+  if (tp->id == 0)
     printf("Digit 0\n");
-    eq->hta.alloc_ht(0);
-  }
   barrier(&eq->barry);
   eq->digit0(tp->id);
   barrier(&eq->barry);
@@ -563,10 +574,8 @@ void *worker(void *vp) {
   }
   barrier(&eq->barry);
   for (u32 r = 1; r < WK; r++) {
-    if (tp->id == 0) {
+    if (tp->id == 0)
       printf("Digit %d", r);
-      eq->hta.alloc_ht(r);
-    }
     barrier(&eq->barry);
     eq->digitr(r, tp->id);
     barrier(&eq->barry);
@@ -574,7 +583,6 @@ void *worker(void *vp) {
       printf(" x%d b%d h%d\n", eq->xfull, eq->bfull, eq->hfull);
       eq->xfull = eq->bfull = eq->hfull = 0;
       eq->showbsizes(r);
-      eq->hta.dealloc_ht(r-1);
     }
     barrier(&eq->barry);
   }
@@ -582,12 +590,6 @@ void *worker(void *vp) {
     printf("Digit %d\n", WK);
   eq->digitK(tp->id);
   barrier(&eq->barry);
-  if (tp->id == 0) {
-    eq->hta.dealloc_ht(WK-1);
-#ifndef JOINHT
-    eq->hta.dealloctrees();
-#endif
-  }
   pthread_exit(NULL);
   return 0;
 }
