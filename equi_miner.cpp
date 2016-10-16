@@ -43,10 +43,11 @@ int main(int argc, char **argv) {
   printf("Looking for wagner-tree on (\"%s\",%d", header, nonce);
   if (range > 1)
     printf("-%d", nonce+range-1);
-  printf(") with %d %d-bits digits and %d threads\n", NDIGITS, DIGITBITS, nthreads);
+  printf(") with %d %d-bit digits and %d threads\n", NDIGITS, DIGITBITS, nthreads);
   thread_ctx *threads = (thread_ctx *)calloc(nthreads, sizeof(thread_ctx));
   assert(threads);
   equi eq(nthreads);
+  printf("Using %dMB of memory\n", eq.hta.alloced >> 20);
   u32 sumnsols = 0;
   for (int r = 0; r < range; r++) {
     eq.setnonce(header, nonce+r);

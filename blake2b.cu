@@ -1,5 +1,7 @@
 // Blake2-B CUDA Implementation
 // tpruvot@github July 2016
+// permission granted to use under MIT license
+// modified for use in Zcash by John Tromp September 2016
 
 /**
  * uint2 direct ops by c++ operator definitions

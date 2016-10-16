@@ -109,86 +109,51 @@ u32 htunits(u32 bytes) {
   return (bytes + sizeof(htunit) - 1) / sizeof(htunit);
 }
 
-#ifdef JOINHT
-u32 slotsize(const u32 r) {
-  return 1 + htunits(hashsize(r));
-}
-// size (in htunits) of bucket in round 0 <= r < WK
-u32 bucketsize(const u32 r) {
-  return NSLOTS * slotsize(r);
-}
-#else
-u32 slotsize(const u32 r) {
-  return 1;
-}
-#endif
-
 // manages hash and tree data
 struct htalloc {
-// Defining JOINHT joins each tree with its corresponding hash,
-// so they may share a cache line. This gives a small speed
-// advantage but comes at the cost of a big memory increase
-// as hash-space can no longer be reclaimed
-#ifdef JOINHT
   htunit *trees[WK];
-#else
-  bucket *trees[WK];
-  htunit *hashes[WK];
-#endif
-  u64 alloced;
+  u32 alloced;
   htalloc() {
     alloced = 0;
   }
   void alloctrees() {
-#ifdef JOINHT
-    for (int r=0; r<WK; r++)
-      trees[r] = (htunit *)alloc(NBUCKETS * NSLOTS * (1 + htunits(hashsize(r))), sizeof(htunit));
-#else
 // optimize xenoncat's fixed memory layout, avoiding any waste
-// digit trees         hashes        trees
-// 0         0 A A A A A A . . . . . .
-// 1         0 A A A A A A B B B B B 1
-// 2         0 2 C C C C C B B B B B 1
-// 3         0 2 C C C C C D D D D 3 1
-// 4         0 2 4 E E E E D D D D 3 1
-// 5         0 2 4 E E E E F F F 5 3 1
-// 6         0 2 4 6 . G G F F F 5 3 1
-// 7         0 2 4 6 . G G H H 7 5 3 1
-// 8         0 2 4 6 8 . I H H 7 5 3 1
+// digit  trees  hashes  trees hashes
+// 0      0 A A A A A A   . . . . . .
+// 1      0 A A A A A A   1 B B B B B
+// 2      0 2 C C C C C   1 B B B B B
+// 3      0 2 C C C C C   1 3 D D D D
+// 4      0 2 4 E E E E   1 3 D D D D
+// 5      0 2 4 E E E E   1 3 5 F F F
+// 6      0 2 4 6 . G G   1 3 5 F F F
+// 7      0 2 4 6 . G G   1 3 5 7 H H
+// 8      0 2 4 6 8 . I   1 3 5 7 H H
     assert(DIGITBITS >= 16); // ensures hashes shorten by 1 unit every 2 digits
-    u32 units0 = htunits(hashsize(0)), units1 = htunits(hashsize(1));
-    digit *heap = (digit *)alloc(1+units0+units1+1, sizeof(digit));
-    for (int r=0; r<WK; r++) {
-      trees[r]  = (bucket *)(heap + (r&1 ? 1+units0+units1-r/2 :   r/2));
-      hashes[r] = (htunit *)(heap + (r&1 ? 1+units0            : 1+r/2));
-    }
-#endif
+    digit *heap[2];
+    for (u32 i =0; i < 2; i++)
+      heap[i] = (digit *)alloc(1 + htunits(hashsize(i)), sizeof(digit));
+    for (int r=0; r<WK; r++)
+      trees[r]  = (htunit *)heap[r&1] + r/2;
   }
   void dealloctrees() {
-#ifdef JOINHT
-    for (int r=0; r<WK; r++)
-      dealloc(trees[r], NBUCKETS * NSLOTS * (1 + htunits(hashsize(r))), sizeof(htunit));
-#else
-    u32 units0 = htunits(hashsize(0)), units1 = htunits(hashsize(1));
-    dealloc(trees[0], 1+units0+units1+1, sizeof(digit));
-#endif
+    for (u32 i =0; i < 2; i++)
+      free(trees[i]);
+  }
+  u32 slotsize(const u32 r) const {
+    return 1 + htunits(hashsize(r&1));
+  }
+  // size (in htunits) of bucket in round 0 <= r < WK
+  u32 bucketsize(const u32 r) const {
+    return NSLOTS * slotsize(r);
   }
   htunit *getbucket(u32 r, u32 bid) const {
-#ifdef JOINHT
     return &trees[r][bid * bucketsize(r)];
-#else
-    return trees[r][bid];
-#endif
   }
   void *alloc(const u32 n, const u32 sz) {
     void *mem  = calloc(n, sz);
     assert(mem);
-    alloced += (u64)n * sz;
+    alloced += n * sz;
     return mem;
-  }
-  void dealloc(void *mem, const u32 n, const u32 sz) {
-    free(mem);
-    alloced -= (u64)n * sz;
   }
 };
 
@@ -249,8 +214,8 @@ struct equi {
     const htunit *bt = hta.getbucket(--r,t.bucketid);
     const u32 size = 1 << r;
     u32 *indices1 = indices + size;
-    listindices(r, bt[t.slotid0 * slotsize(r)].attr, indices);
-    listindices(r, bt[t.slotid1 * slotsize(r)].attr, indices1);
+    listindices(r, bt[t.slotid0 * hta.slotsize(r)].attr, indices);
+    listindices(r, bt[t.slotid1 * hta.slotsize(r)].attr, indices1);
     if (*indices > *indices1) {
       for (u32 i=0; i < size; i++) {
         const u32 tmp = indices[i];
@@ -292,7 +257,7 @@ struct equi {
       printf("\342\226%c", '\201'+bsizes[i]/SPARKSCALE);
 #endif
     }
-    printf(" %ld MB\n", hta.alloced >> 20);
+    printf("\n");
 #endif
   }
 
@@ -300,65 +265,47 @@ struct equi {
     htalloc hta;
     u32 prevhtunits;
     u32 nexthtunits;
+    u32 prevslotunits;
+    u32 nextslotunits;
     u32 dunits;
     u32 prevbo;
     u32 nextbo;
     htunit *buck;
     htunit *hashbase;
   
-    htlayout(equi *eq, u32 r): hta(eq->hta), prevhtunits(0), dunits(0) {
+    htlayout(equi *eq, u32 r): hta(eq->hta), prevhtunits(0), prevslotunits(0), dunits(0) {
       u32 nexthashbytes = hashsize(r);
       nexthtunits = htunits(nexthashbytes);
+      nextslotunits = 1 + htunits(hashsize(r&1));
       prevbo = 0;
       nextbo = nexthtunits * sizeof(htunit) - nexthashbytes; // 0-3
       if (r) {
         u32 prevhashbytes = hashsize(r-1);
         prevhtunits = htunits(prevhashbytes);
+        prevslotunits = 1 + htunits(hashsize((r-1)&1));
         prevbo = prevhtunits * sizeof(htunit) - prevhashbytes; // 0-3
         dunits = prevhtunits - nexthtunits;
       }
-#ifdef JOINHT
-      nexthtunits++;
-      prevhtunits++;
-#endif
     }
     void setbucket(u32 r, u32 bid) {
       buck = hta.getbucket(r, bid);
-#ifdef JOINHT
       hashbase = buck + 1;
-#else
-      hashbase = hta.hashes[r] + (bid * NSLOTS) * prevhtunits;
-#endif
     }
     u32 getxhash(const u32 slot, const htunit *hash) const {
 #ifdef XWITHASH
       return hash->bytes[prevbo] & 0xf;
-#elif defined JOINHT
-      return buck[slot * prevhtunits].attr.xhash;
 #else
-      return buck[slot].attr.xhash;
-#endif
-    }
-    u32 prevhashunits() const {
-#ifdef JOINHT
-      return prevhtunits - 1;
-#else
-      return prevhtunits;
+      return buck[slot * prevslotunits].attr.xhash;
 #endif
     }
     bool equal(const htunit *hash0, const htunit *hash1) const {
-      return hash0[prevhashunits()-1].hash == hash1[prevhashunits()-1].hash;
+      return hash0[prevhtunits-1].hash == hash1[prevhtunits-1].hash;
     }
     htunit *addtree(u32 r, tree t, u32 bid, u32 slot) {
       htunit *buck = hta.getbucket(r,bid);
-#ifdef JOINHT
-      htunit *slotree = buck + slot * nexthtunits;
+      htunit *slotree = buck + slot * nextslotunits;
       slotree->attr = t;
       return slotree + 1;
-#else
-      buck[slot].attr = t;
-      return hta.hashes[r] + (bid * NSLOTS + slot) * nexthtunits;
-#endif
     }
   };
 
@@ -467,14 +414,14 @@ struct equi {
       htl.setbucket(r-1, bucketid);
       u32 bsize = getnslots(r-1, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *hash1 = htl.hashbase + s1 * htl.prevhtunits;
+        const htunit *hash1 = htl.hashbase + s1 * htl.prevslotunits;
         if (!cd.addslot(s1, htl.getxhash(s1, hash1))) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          const htunit *hash0 = htl.hashbase + s0 * htl.prevhtunits;
+          const htunit *hash0 = htl.hashbase + s0 * htl.prevslotunits;
           if (htl.equal(hash0, hash1)) {
             hfull++;
             continue;
@@ -511,7 +458,7 @@ struct equi {
           xort.xhash = xhash;
 #endif
           htunit *xorhash = htl.addtree(r, xort, xorbucketid, xorslot);
-          for (u32 i=htl.dunits; i < htl.prevhashunits(); i++)
+          for (u32 i=htl.dunits; i < htl.prevhtunits; i++)
             xorhash[i-htl.dunits].hash = hash0[i].hash ^ hash1[i].hash;
         }
       }
@@ -526,12 +473,12 @@ struct equi {
       htl.setbucket(WK-1, bucketid);
       u32 bsize = getnslots(WK-1, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *hash1 = htl.hashbase + s1 * htl.prevhtunits;
+        const htunit *hash1 = htl.hashbase + s1 * htl.prevslotunits;
         if (!cd.addslot(s1, htl.getxhash(s1, hash1)))
           continue;
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          const htunit *hash0 = htl.hashbase + s0 * htl.prevhtunits;
+          const htunit *hash0 = htl.hashbase + s0 * htl.prevslotunits;
           if (htl.equal(hash0, hash1)) {
             tree xort; xort.bucketid = bucketid;
             xort.slotid0 = s0; xort.slotid1 = s1;
