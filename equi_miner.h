@@ -132,7 +132,6 @@ struct htalloc {
 #ifdef JOINHT
   htunit *trees[WK];
 #else
-  digit *heap;
   bucket *trees[WK];
   htunit *hashes[WK];
 #endif
@@ -158,7 +157,7 @@ struct htalloc {
 // 8         0 2 4 6 8 . I H H 7 5 3 1
     assert(DIGITBITS >= 16); // ensures hashes shorten by 1 unit every 2 digits
     u32 units0 = htunits(hashsize(0)), units1 = htunits(hashsize(1));
-    heap = (digit *)alloc(1+units0+units1+1, sizeof(digit));
+    digit *heap = (digit *)alloc(1+units0+units1+1, sizeof(digit));
     for (int r=0; r<WK; r++) {
       trees[r]  = (bucket *)(heap + (r&1 ? 1+units0+units1-r/2 :   r/2));
       hashes[r] = (htunit *)(heap + (r&1 ? 1+units0            : 1+r/2));
@@ -171,7 +170,7 @@ struct htalloc {
       dealloc(trees[r], NBUCKETS * NSLOTS * (1 + htunits(hashsize(r))), sizeof(htunit));
 #else
     u32 units0 = htunits(hashsize(0)), units1 = htunits(hashsize(1));
-    dealloc(heap, 1+units0+units1+1, sizeof(digit));
+    dealloc(trees[0], 1+units0+units1+1, sizeof(digit));
 #endif
   }
   htunit *getbucket(u32 r, u32 bid) const {
