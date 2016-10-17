@@ -24,6 +24,7 @@
 #include <pthread.h>
 #include <assert.h>
 
+typedef uint16_t u16;
 typedef uint64_t u64;
 
 #ifdef ATOMIC
@@ -34,7 +35,7 @@ typedef u32 au32;
 #endif
 
 #ifndef RESTBITS
-#define RESTBITS	4
+#define RESTBITS	8
 #endif
 
 // 2_log of number of buckets
@@ -47,7 +48,7 @@ static const u32 SLOTBITS = RESTBITS+1+1;
 // number of slots per bucket
 static const u32 NSLOTS = 1<<SLOTBITS;
 // number of per-xhash slots
-static const u32 XFULL = NSLOTS/4;
+static const u32 XFULL = 64;
 // SLOTBITS mask
 static const u32 SLOTMASK = NSLOTS-1;
 // number of possible values of xhash (rest of n) bits
@@ -57,20 +58,12 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLAKE-1)/HASHESPERBLAKE;
 // nothing larger found in 100000 runs
 static const u32 MAXSOLS = 8;
 
-// scaling factor for showing bucketsize histogra as sparkline
-#ifndef SPARKSCALE
-#define SPARKSCALE	(40 << (BUCKBITS-12))
-#endif
-
 // tree node identifying its children as two different slots in
 // a bucket on previous layer with the same rest bits (x-tra hash)
 struct tree {
   unsigned bucketid : BUCKBITS;
   unsigned slotid0  : SLOTBITS;
   unsigned slotid1  : SLOTBITS;
-#ifndef XWITHASH
-  unsigned xhash    : RESTBITS;
-#endif
 
 // layer 0 has no children bit needs to encode index
   u32 getindex() const {
@@ -82,36 +75,49 @@ struct tree {
   }
 };
 
-union htunit {
-  tree attr;
-  u32 hash;
+union hashunit {
+  u32 word;
   uchar bytes[sizeof(u32)];
 };
 
+#define WORDS(bits)	((bits + 31) / 32)
+#define HASHWORDS0 WORDS(WN - DIGITBITS + RESTBITS)
+#define HASHWORDS1 WORDS(WN - 2*DIGITBITS + RESTBITS)
+
+struct slot0 {
+  tree attr;
+  hashunit hash[HASHWORDS0];
+};
+
+struct slot1 {
+  tree attr;
+  hashunit hash[HASHWORDS1];
+};
+
 // a bucket is NSLOTS treenodes
-typedef htunit bucket[NSLOTS];
+typedef slot0 bucket0[NSLOTS];
+typedef slot1 bucket1[NSLOTS];
 // the N-bit hash consists of K+1 n-bit "digits"
 // each of which corresponds to a layer of NBUCKETS buckets
-typedef bucket digit[NBUCKETS];
+typedef bucket0 digit0[NBUCKETS];
+typedef bucket1 digit1[NBUCKETS];
 
 // size (in bytes) of hash in round 0 <= r < WK
 u32 hashsize(const u32 r) {
-#ifdef XWITHASH
   const u32 hashbits = WN - (r+1) * DIGITBITS + RESTBITS;
-#else
-  const u32 hashbits = WN - (r+1) * DIGITBITS;
-#endif
   return (hashbits + 7) / 8;
 }
 
-
-u32 htunits(u32 bytes) {
-  return (bytes + sizeof(htunit) - 1) / sizeof(htunit);
+u32 hashwords(u32 bytes) {
+  return (bytes + 3) / 4;
 }
 
 // manages hash and tree data
 struct htalloc {
-  htunit *trees[WK];
+  u32 *heap0;
+  u32 *heap1;
+  bucket0 *trees0[(WK+1)/2];
+  bucket1 *trees1[WK/2];
   u32 alloced;
   htalloc() {
     alloced = 0;
@@ -129,25 +135,17 @@ struct htalloc {
 // 7      0 2 4 6 . G G   1 3 5 7 H H
 // 8      0 2 4 6 8 . I   1 3 5 7 H H
     assert(DIGITBITS >= 16); // ensures hashes shorten by 1 unit every 2 digits
-    digit *heap[2];
-    for (u32 i =0; i < 2; i++)
-      heap[i] = (digit *)alloc(1 + htunits(hashsize(i)), sizeof(digit));
+    heap0 = (u32 *)alloc(1, sizeof(digit0));
+    heap1 = (u32 *)alloc(1, sizeof(digit1));
     for (int r=0; r<WK; r++)
-      trees[r]  = (htunit *)heap[r&1] + r/2;
+      if ((r&1) == 0)
+        trees0[r/2]  = (bucket0 *)(heap0 + r/2);
+      else
+        trees1[r/2]  = (bucket1 *)(heap1 + r/2);
   }
   void dealloctrees() {
-    for (u32 i =0; i < 2; i++)
-      free(trees[i]);
-  }
-  u32 slotsize(const u32 r) const {
-    return 1 + htunits(hashsize(r&1));
-  }
-  // size (in htunits) of bucket in round 0 <= r < WK
-  u32 bucketsize(const u32 r) const {
-    return NSLOTS * slotsize(r);
-  }
-  htunit *getbucket(u32 r, u32 bid) const {
-    return &trees[r][bid * bucketsize(r)];
+    free(heap0);
+    free(heap1);
   }
   void *alloc(const u32 n, const u32 sz) {
     void *mem  = calloc(n, sz);
@@ -166,7 +164,7 @@ u32 min(const u32 a, const u32 b) {
 struct equi {
   blake2b_state blake_ctx;
   htalloc hta;
-  bsizes *nslots;
+  bsizes *nslots; // PUT IN BUCKET STRUCT
   proof *sols;
   au32 nsols;
   u32 nthreads;
@@ -175,13 +173,13 @@ struct equi {
   u32 bfull;
   pthread_barrier_t barry;
   equi(const u32 n_threads) {
-    assert(sizeof(htunit) == 4);
+    assert(sizeof(hashunit) == 4);
     nthreads = n_threads;
     const int err = pthread_barrier_init(&barry, NULL, nthreads);
     assert(!err);
     hta.alloctrees();
-    nslots    = (bsizes *)hta.alloc(2 * NBUCKETS, sizeof(au32));
-    sols = (proof *)hta.alloc(MAXSOLS, sizeof(proof));
+    nslots = (bsizes *)hta.alloc(2 * NBUCKETS, sizeof(au32));
+    sols   =  (proof *)hta.alloc(MAXSOLS, sizeof(proof));
   }
   ~equi() {
     hta.dealloctrees();
@@ -193,40 +191,51 @@ struct equi {
     memset(nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
     nsols = 0;
   }
-  u32 findslot(const u32 r, const u32 bucketi) {
+  u32 getslot(const u32 r, const u32 bucketi) {
 #ifdef ATOMIC
     return std::atomic_fetch_add_explicit(&nslots[r&1][bucketi], 1U, std::memory_order_relaxed);
 #else
     return nslots[r&1][bucketi]++;
 #endif
   }
-  u32 getnslots(const u32 r, const u32 bid) {
+  u32 getnslots(const u32 r, const u32 bid) { // SHOULD BE METHOD IN BUCKET STRUCT
     au32 &nslot = nslots[r&1][bid];
     const u32 n = min(nslot, NSLOTS);
     nslot = 0;
     return n;
   }
-  void listindices(u32 r, const tree t, u32 *indices) {
+  void orderindices(u32 *indices, u32 size) {
+    if (indices[0] > indices[size]) {
+      for (u32 i=0; i < size; i++) {
+        const u32 tmp = indices[i];
+        indices[i] = indices[size+i];
+        indices[size+i] = tmp;
+      }
+    }
+  }
+  void listindices0(u32 r, const tree t, u32 *indices) {
     if (r == 0) {
       *indices = t.getindex();
       return;
     }
-    const htunit *bt = hta.getbucket(--r,t.bucketid);
+    const bucket1 &buck = hta.trees1[--r/2][t.bucketid];
     const u32 size = 1 << r;
     u32 *indices1 = indices + size;
-    listindices(r, bt[t.slotid0 * hta.slotsize(r)].attr, indices);
-    listindices(r, bt[t.slotid1 * hta.slotsize(r)].attr, indices1);
-    if (*indices > *indices1) {
-      for (u32 i=0; i < size; i++) {
-        const u32 tmp = indices[i];
-        indices[i] = indices1[i];
-        indices1[i] = tmp;
-      }
-    }
+    listindices1(r, buck[t.slotid0].attr, indices);
+    listindices1(r, buck[t.slotid1].attr, indices1);
+    orderindices(indices, size);
+  }
+  void listindices1(u32 r, const tree t, u32 *indices) {
+    const bucket0 &buck = hta.trees0[--r/2][t.bucketid];
+    const u32 size = 1 << r;
+    u32 *indices1 = indices + size;
+    listindices0(r, buck[t.slotid0].attr, indices);
+    listindices0(r, buck[t.slotid1].attr, indices1);
+    orderindices(indices, size);
   }
   void candidate(const tree t) {
     proof prf;
-    listindices(WK, t, prf);
+    listindices1(WK, t, prf); // assume WK odd
     qsort(prf, PROOFSIZE, sizeof(u32), &compu32);
     for (u32 i=1; i<PROOFSIZE; i++)
       if (prf[i] <= prf[i-1])
@@ -237,24 +246,28 @@ struct equi {
     u32 soli = nsols++;
 #endif
     if (soli < MAXSOLS)
-      listindices(WK, t, sols[soli]);
+      listindices1(WK, t, sols[soli]); // assume WK odd
   }
   void showbsizes(u32 r) {
-#if defined(HIST) || defined(SPARK)
-    u32 bsizes[NSLOTS+1];
-    memset(bsizes, 0, (NSLOTS+1) * sizeof(u32));
+#if defined(HIST) || defined(SPARK) || defined(LOGSPARK)
+    u32 binsizes[65];
+    memset(binsizes, 0, 65 * sizeof(u32));
     for (u32 bucketid = 0; bucketid < NBUCKETS; bucketid++) {
-      u32 bsize = nslots[r&1][bucketid];
-      if (bsize < NSLOTS)
-        bsizes[bsize]++;
-      else
-        bsizes[NSLOTS]++;
+      u32 bsize = min(nslots[r&1][bucketid], NSLOTS) >> (SLOTBITS-6);
+      binsizes[bsize]++;
     }
-    for (u32 i=0; i<=NSLOTS; i++) {
+    for (u32 i=0; i < 65; i++) {
 #ifdef HIST
-      printf(" %d:%d", i, bsizes[i]);
+      printf(" %d:%d", i, binsizes[i]);
 #else
-      printf("\342\226%c", '\201'+bsizes[i]/SPARKSCALE);
+#ifdef SPARK
+      u32 sparks = binsizes[i] / SPARKSCALE;
+#else
+      u32 sparks = 0;
+      for (u32 bs = binsizes[i]; bs; bs >>= 1) sparks++;
+      sparks = sparks * 7 / SPARKSCALE;
+#endif
+      printf("\342\226%c", '\201' + sparks);
 #endif
     }
     printf("\n");
@@ -263,58 +276,64 @@ struct equi {
 
   struct htlayout {
     htalloc hta;
-    u32 prevhtunits;
-    u32 nexthtunits;
-    u32 prevslotunits;
-    u32 nextslotunits;
+    u32 prevhashunits;
+    u32 nexthashunits;
     u32 dunits;
     u32 prevbo;
     u32 nextbo;
-    htunit *buck;
-    htunit *hashbase;
   
-    htlayout(equi *eq, u32 r): hta(eq->hta), prevhtunits(0), prevslotunits(0), dunits(0) {
+    htlayout(equi *eq, u32 r): hta(eq->hta), prevhashunits(0), dunits(0) {
       u32 nexthashbytes = hashsize(r);
-      nexthtunits = htunits(nexthashbytes);
-      nextslotunits = 1 + htunits(hashsize(r&1));
+      nexthashunits = hashwords(nexthashbytes);
       prevbo = 0;
-      nextbo = nexthtunits * sizeof(htunit) - nexthashbytes; // 0-3
+      nextbo = nexthashunits * sizeof(hashunit) - nexthashbytes; // 0-3
       if (r) {
         u32 prevhashbytes = hashsize(r-1);
-        prevhtunits = htunits(prevhashbytes);
-        prevslotunits = 1 + htunits(hashsize((r-1)&1));
-        prevbo = prevhtunits * sizeof(htunit) - prevhashbytes; // 0-3
-        dunits = prevhtunits - nexthtunits;
+        prevhashunits = hashwords(prevhashbytes);
+        prevbo = prevhashunits * sizeof(hashunit) - prevhashbytes; // 0-3
+        dunits = prevhashunits - nexthashunits;
       }
     }
-    void setbucket(u32 r, u32 bid) {
-      buck = hta.getbucket(r, bid);
-      hashbase = buck + 1;
-    }
-    u32 getxhash(const u32 slot, const htunit *hash) const {
-#ifdef XWITHASH
-      return hash->bytes[prevbo] & 0xf;
+    u32 getxhash0(const slot0* pslot) const {
+#if WN == 200 && RESTBITS == 4
+      return pslot->hash->bytes[prevbo] >> 4;
+#elif WN == 200 && RESTBITS == 8
+      return (pslot->hash->bytes[prevbo] & 0xf) << 4 | pslot->hash->bytes[prevbo+1] >> 4;
+#elif WN == 144 && RESTBITS == 4
+      return pslot->hash->bytes[prevbo] & 0xf;
 #else
-      return buck[slot * prevslotunits].attr.xhash;
+#error non implemented
 #endif
     }
-    bool equal(const htunit *hash0, const htunit *hash1) const {
-      return hash0[prevhtunits-1].hash == hash1[prevhtunits-1].hash;
+    u32 getxhash1(const slot1* pslot) const {
+#if WN == 200 && RESTBITS == 4
+      return pslot->hash->bytes[prevbo] & 0xf;
+#elif WN == 200 && RESTBITS == 8
+      return pslot->hash->bytes[prevbo];
+#elif WN == 144 && RESTBITS == 4
+      return pslot->hash->bytes[prevbo] & 0xf;
+#else
+#error non implemented
+#endif
     }
-    htunit *addtree(u32 r, tree t, u32 bid, u32 slot) {
-      htunit *buck = hta.getbucket(r,bid);
-      htunit *slotree = buck + slot * nextslotunits;
-      slotree->attr = t;
-      return slotree + 1;
+    bool equal(const hashunit *hash0, const hashunit *hash1) const {
+      return hash0[prevhashunits-1].word == hash1[prevhashunits-1].word;
     }
   };
 
   struct collisiondata {
 #ifdef XBITMAP
+#if NSLOTS > 64
+#error cant use XBITMAP with more than 64 slots
+#endif
     u64 xhashmap[NRESTS];
     u64 xmap;
 #else
+#if RESTBITS <= 6
     typedef uchar xslot;
+#else
+    typedef u16 xslot;
+#endif
     xslot nxhashslots[NRESTS];
     xslot xhashslots[NRESTS][XFULL];
     xslot *xx;
@@ -371,102 +390,134 @@ struct equi {
     const u32 hashbytes = hashsize(0);
     for (u32 block = id; block < NBLOCKS; block += nthreads) {
       state = blake_ctx;
-      const u32 leb = htole32(block);
+      u32 leb = htole32(block);
       blake2b_update(&state, (uchar *)&leb, sizeof(u32));
       blake2b_final(&state, hash, HASHOUT);
       for (u32 i = 0; i<HASHESPERBLAKE; i++) {
         const uchar *ph = hash + i * WN/8;
 #if BUCKBITS == 16 && RESTBITS == 4
         const u32 bucketid = ((u32)ph[0] << 8) | ph[1];
-#ifndef XWITHASH
-        const u32 xhash = ph[2] >> 4;
-#endif
+#elif BUCKBITS == 12 && RESTBITS == 8
+        const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
 #elif BUCKBITS == 20 && RESTBITS == 4
         const u32 bucketid = ((((u32)ph[0] << 8) | ph[1]) << 4) | ph[2] >> 4;
-#ifndef XWITHASH
-        const u32 xhash = ph[2] & 0xf;
-#endif
 #elif BUCKBITS == 12 && RESTBITS == 4
         const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
         const u32 xhash = ph[1] & 0xf;
 #else
 #error not implemented
 #endif
-        const u32 slot = findslot(0, bucketid);
+        const u32 slot = getslot(0, bucketid);
         if (slot >= NSLOTS) {
           bfull++;
           continue;
         }
         tree leaf;
         leaf.setindex(block*HASHESPERBLAKE+i);
-#ifndef XWITHASH
-        leaf.xhash = xhash;
-#endif
-        htunit *dest = htl.addtree(0, leaf, bucketid, slot);
-        memcpy(dest->bytes+htl.nextbo, ph+WN/8-hashbytes, hashbytes);
+        slot0 &s = hta.trees0[0][bucketid][slot];
+        s.attr = leaf;
+        memcpy(s.hash->bytes+htl.nextbo, ph+WN/8-hashbytes, hashbytes);
       }
     }
   }
   
-  void digitr(const u32 r, const u32 id) {
+  void digitodd(const u32 r, const u32 id) {
     htlayout htl(this, r);
     collisiondata cd;
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      htl.setbucket(r-1, bucketid);
-      u32 bsize = getnslots(r-1, bucketid);
+      slot0 *buck = htl.hta.trees0[(r-1)/2][bucketid]; // optimize by updating previous buck?!
+      u32 bsize = getnslots(r-1, bucketid);       // optimize by putting bucketsize with block?!
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *hash1 = htl.hashbase + s1 * htl.prevslotunits;
-        if (!cd.addslot(s1, htl.getxhash(s1, hash1))) {
+        const slot0 *pslot1 = buck + s1;          // optimize by updating previous pslot1?!
+        if (!cd.addslot(s1, htl.getxhash0(pslot1))) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          const htunit *hash0 = htl.hashbase + s0 * htl.prevslotunits;
-          if (htl.equal(hash0, hash1)) {
+          const slot0 *pslot0 = buck + s0;
+          if (htl.equal(pslot0->hash, pslot1->hash)) {
             hfull++;
             continue;
           }
           u32 xorbucketid;
-          u32 xhash;
-#if BUCKBITS == 16 && RESTBITS == 4
-#ifdef XWITHASH
-          xhash = hash0->bytes[htl.prevbo+2] ^ hash1->bytes[htl.prevbo+2];
-#error not yet implemented
-#else
-          xorbucketid = ((u32)(hash0->bytes[htl.prevbo]^hash1->bytes[htl.prevbo]) << 8)
-            | (hash0->bytes[htl.prevbo+1]^hash1->bytes[htl.prevbo+1]);
-          xhash = hash0->bytes[htl.prevbo+2] ^ hash1->bytes[htl.prevbo+2];
-          if (r&1) {
-            xorbucketid = ((xorbucketid & 0xfff) << 4) | (xhash >> 4);
-            xhash &= 0xf;
-          } else xhash >>= 4;
-#endif
-#elif BUCKBITS == 20 && RESTBITS == 4 && defined XWITHASH
-          xhash = hash0->bytes[htl.prevbo+3] ^ hash1->bytes[htl.prevbo+3];
-          xorbucketid = ((((u32)(hash0->bytes[htl.prevbo+1]^hash1->bytes[htl.prevbo+1]) << 8) | (hash0->bytes[htl.prevbo+2]^hash1->bytes[htl.prevbo+2])) << 4) | xhash >> 4;
-          xhash &= 0xf;
-#elif BUCKBITS == 12 && RESTBITS == 4
-          xhash = hash0->bytes[htl.prevbo+1] ^ hash1->bytes[htl.prevbo+1];
-          xorbucketid = ((u32)(hash0->bytes[htl.prevbo]^hash1->bytes[htl.prevbo]) << 4) | xhash >> 4;
-          xhash &= 0xf;
+          const uchar *bytes0 = pslot0->hash->bytes, *bytes1 = pslot1->hash->bytes;
+#if WN == 200 && BUCKBITS == 12 && RESTBITS == 8
+          xorbucketid = (((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) & 0xf) << 8)
+                             | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]);
+#elif WN == 144 && BUCKBITS == 20 && RESTBITS == 4
+          xorbucketid = ((((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 8)
+                              | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2])) << 4)
+                              | (bytes0[htl.prevbo+3] ^ bytes1[htl.prevbo+3]) >> 4;
+#elif WN == 96 && BUCKBITS == 12 && RESTBITS == 4
+          xorbucketid = ((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 4)
+                            | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
 #else
 #error not implemented
 #endif
-          const u32 xorslot = findslot(r, xorbucketid);
+          const u32 xorslot = getslot(r, xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
           tree xort; xort.bucketid = bucketid;
           xort.slotid0 = s0; xort.slotid1 = s1;
-#ifndef XWITHASH
-          xort.xhash = xhash;
+          slot1 &xs = htl.hta.trees1[r/2][xorbucketid][xorslot];
+          xs.attr = xort;
+          for (u32 i=htl.dunits; i < htl.prevhashunits; i++)
+            xs.hash[i-htl.dunits].word = pslot0->hash[i].word ^ pslot1->hash[i].word;
+        }
+      }
+    }
+  }
+  
+  void digiteven(const u32 r, const u32 id) {
+    htlayout htl(this, r);
+    collisiondata cd;
+    for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
+      cd.clear();
+      slot1 *buck = htl.hta.trees1[(r-1)/2][bucketid]; // OPTIMIZE BY UPDATING PREVIOUS
+      u32 bsize = getnslots(r-1, bucketid);
+      for (u32 s1 = 0; s1 < bsize; s1++) {
+        const slot1 *pslot1 = buck + s1;          // OPTIMIZE BY UPDATING PREVIOUS
+        if (!cd.addslot(s1, htl.getxhash1(pslot1))) {
+          xfull++;
+          continue;
+        }
+        for (; cd.nextcollision(); ) {
+          const u32 s0 = cd.slot();
+          const slot1 *pslot0 = buck + s0;
+          if (htl.equal(pslot0->hash, pslot1->hash)) {
+            hfull++;
+            continue;
+          }
+          u32 xorbucketid;
+          const uchar *bytes0 = pslot0->hash->bytes, *bytes1 = pslot1->hash->bytes;
+#if WN == 200 && BUCKBITS == 12 && RESTBITS == 8
+          xorbucketid = ((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 4)
+                            | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
+#elif WN == 144 && BUCKBITS == 20 && RESTBITS == 4
+          xorbucketid = ((((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 8)
+                              | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2])) << 4)
+                              | (bytes0[htl.prevbo+3] ^ bytes1[htl.prevbo+3]) >> 4;
+#elif WN == 96 && BUCKBITS == 12 && RESTBITS == 4
+          xorbucketid = ((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 4)
+                            | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
+#else
+#error not implemented
 #endif
-          htunit *xorhash = htl.addtree(r, xort, xorbucketid, xorslot);
-          for (u32 i=htl.dunits; i < htl.prevhtunits; i++)
-            xorhash[i-htl.dunits].hash = hash0[i].hash ^ hash1[i].hash;
+          const u32 xorslot = getslot(r, xorbucketid);
+          if (xorslot >= NSLOTS) {
+            bfull++;
+            continue;
+          }
+          tree xort; xort.bucketid = bucketid;
+          xort.slotid0 = s0; xort.slotid1 = s1;
+          slot0 &xs = htl.hta.trees0[r/2][xorbucketid][xorslot];
+          xs.attr = xort;
+          for (u32 i=htl.dunits; i < htl.prevhashunits; i++)
+            xs.hash[i-htl.dunits].word = pslot0->hash[i].word ^ pslot1->hash[i].word;
         }
       }
     }
@@ -477,16 +528,16 @@ struct equi {
     htlayout htl(this, WK);
     for (u32 bucketid = id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      htl.setbucket(WK-1, bucketid);
+      slot0 *buck = htl.hta.trees0[(WK-1)/2][bucketid];
       u32 bsize = getnslots(WK-1, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *hash1 = htl.hashbase + s1 * htl.prevslotunits;
-        if (!cd.addslot(s1, htl.getxhash(s1, hash1)))
+        const slot0 *pslot1 = buck + s1;
+        if (!cd.addslot(s1, htl.getxhash0(pslot1))) // assume WK odd
           continue;
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          const htunit *hash0 = htl.hashbase + s0 * htl.prevslotunits;
-          if (htl.equal(hash0, hash1)) {
+          const slot0 *pslot0 = buck + s0;
+          if (htl.equal(pslot0->hash, pslot1->hash)) {
             tree xort; xort.bucketid = bucketid;
             xort.slotid0 = s0; xort.slotid1 = s1;
             candidate(xort);
@@ -511,7 +562,6 @@ void barrier(pthread_barrier_t *barry) {
   }
 }
 
-
 void *worker(void *vp) {
   thread_ctx *tp = (thread_ctx *)vp;
   equi *eq = tp->eq;
@@ -530,7 +580,7 @@ void *worker(void *vp) {
     if (tp->id == 0)
       printf("Digit %d", r);
     barrier(&eq->barry);
-    eq->digitr(r, tp->id);
+    r&1 ? eq->digitodd(r, tp->id) : eq->digiteven(r, tp->id);
     barrier(&eq->barry);
     if (tp->id == 0) {
       printf(" x%d b%d h%d\n", eq->xfull, eq->bfull, eq->hfull);

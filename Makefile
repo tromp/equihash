@@ -11,13 +11,16 @@ equi1:	equi.h equi_miner.h equi_miner.cpp Makefile
 	$(GPP) equi_miner.cpp blake/blake2b.cpp -o equi1
 
 equi1g:	equi.h equi_miner.h equi_miner.cpp Makefile
-	g++ -g -DSPARK equi_miner.cpp blake/blake2b.cpp -pthread -o equi1g
+	g++ -g -DLOGSPARK -DSPARKSCALE=11 equi_miner.cpp blake/blake2b.cpp -pthread -o equi1g
 
 equi965:	equi.h equi_miner.h equi_miner.cpp Makefile
 	$(GPP) -DWN=96 -DWK=5 equi_miner.cpp blake/blake2b.cpp -o equi965
 
 equi1445:	equi.h equi_miner.h equi_miner.cpp Makefile
-	$(GPP) -DWN=144 -DWK=5 -DXWITHASH equi_miner.cpp blake/blake2b.cpp -o equi1445
+	$(GPP) -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp -o equi1445
+
+dev1:	equi.h dev_miner.h dev_miner.cpp Makefile
+	$(GPP) -DRESTBITS=8 dev_miner.cpp blake/blake2b.cpp -o dev1
 
 eqcuda:	equi_miner.cu equi.h blake2b.cu Makefile
 	nvcc -arch sm_35 equi_miner.cu blake/blake2b.cpp -o eqcuda
@@ -32,7 +35,7 @@ verify:	equi.h equi.c Makefile
 	g++ -g equi.c blake/blake2b.cpp -o verify
 
 bench:	equi1
-	time ./equi1 -n 1000 -r 100
+	time ./equi1 -r 10
 
 test:	equi verify Makefile
 	time ./equi -h "" -n 0 -t 1 -s | grep ^Sol | ./verify -h "" -n 0
