@@ -48,7 +48,7 @@ static const u32 SLOTBITS = RESTBITS+1+1;
 // number of slots per bucket
 static const u32 NSLOTS = 1<<SLOTBITS;
 // number of per-xhash slots
-static const u32 XFULL = 12;
+static const u32 XFULL = 16;
 // SLOTBITS mask
 static const u32 SLOTMASK = NSLOTS-1;
 // number of possible values of xhash (rest of n) bits
