@@ -25,6 +25,9 @@ dev1:	equi.h dev_miner.h dev_miner.cpp Makefile
 eqcuda:	equi_miner.cu equi.h blake2b.cu Makefile
 	nvcc -arch sm_35 equi_miner.cu blake/blake2b.cpp -o eqcuda
 
+devcuda:	dev_miner.cu equi.h blake2b.cu Makefile
+	nvcc -arch sm_35 dev_miner.cu blake/blake2b.cpp -o devcuda
+
 eqcuda1445:	equi_miner.cu equi.h blake2b.cu Makefile
 	nvcc -DWN=144 -DWK=5 -DXWITHASH -arch sm_35 equi_miner.cu blake/blake2b.cpp -o eqcuda1445
 
