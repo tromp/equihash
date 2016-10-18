@@ -151,8 +151,8 @@ struct equi {
   equi(const u32 n_threads) {
     nthreads = n_threads;
   }
-  void setnonce(const char *header, u32 nonce) {
-    setheader(&blake_ctx, header, nonce);
+  void setnonce(const char *header, const u32 headerlen, const u32 nonce) {
+    setheader(&blake_ctx, header, headerlen, nonce);
     checkCudaErrors(cudaMemset(nslots, 0, NBUCKETS * sizeof(u32)));
     nsols = 0;
   }
@@ -913,7 +913,7 @@ int main(int argc, char **argv) {
   u32 sumnsols = 0;
   for (int r = 0; r < range; r++) {
     cudaEventRecord(start, NULL);
-    eq.setnonce(header, nonce+r);
+    eq.setnonce(header, strlen(header), nonce+r);
     checkCudaErrors(cudaMemcpy(device_eq, &eq, sizeof(equi), cudaMemcpyHostToDevice));
     printf("Digit 0\n");
     digit0<<<nthreads/tpb,tpb >>>(device_eq);
