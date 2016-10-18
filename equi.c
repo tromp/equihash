@@ -3,6 +3,7 @@
 #include <stdio.h>    // printf/scanf
 #include <stdlib.h>   // exit
 #include <unistd.h>   // getopt
+#include <string.h>   // strlen
 #include <assert.h>   // d'uh
 
 int main(int argc, char **argv) {
@@ -26,7 +27,7 @@ int main(int argc, char **argv) {
       int nscan = scanf(" %x", &indices[n]);
       assert(nscan == 1);
     }
-    int pow_rc = verify(indices, header, nonce);
+    int pow_rc = verify(indices, header, strlen(header), nonce);
     if (pow_rc == POW_OK)
       printf("Verified\n");
     else

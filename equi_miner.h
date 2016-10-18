@@ -48,7 +48,7 @@ static const u32 SLOTBITS = RESTBITS+1+1;
 // number of slots per bucket
 static const u32 NSLOTS = 1<<SLOTBITS;
 // number of per-xhash slots
-static const u32 XFULL = 64;
+static const u32 XFULL = 12;
 // SLOTBITS mask
 static const u32 SLOTMASK = NSLOTS-1;
 // number of possible values of xhash (rest of n) bits
@@ -186,8 +186,8 @@ struct equi {
     free(nslots);
     free(sols);
   }
-  void setnonce(const char *header, u32 nonce) {
-    setheader(&blake_ctx, header, nonce);
+  void setnonce(const char *header, const u32 headerlen, const u32 nonce) {
+    setheader(&blake_ctx, header, headerlen, nonce);
     memset(nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
     nsols = 0;
   }

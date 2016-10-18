@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
   printf("Using %dMB of memory\n", eq.hta.alloced >> 20);
   u32 sumnsols = 0;
   for (int r = 0; r < range; r++) {
-    eq.setnonce(header, nonce+r);
+    eq.setnonce(header, strlen(header), nonce+r);
     for (int t = 0; t < nthreads; t++) {
       threads[t].id = t;
       threads[t].eq = &eq;
