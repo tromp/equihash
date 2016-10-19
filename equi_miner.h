@@ -41,16 +41,28 @@ typedef u32 au32;
 // 2_log of number of buckets
 #define BUCKBITS (DIGITBITS-RESTBITS)
 
+#ifndef SAVEMEM
+#if RESTBITS == 4
+// can't save memory in such small buckets
+#define SAVEMEM 1
+#elif RESTBITS >= 8
+// take advantage of law of large numbers (sum of 2^8 random numbers)
+// this reduces (200,9) memory to under 144MB, with negligible discarding
+#define SAVEMEM 9/14
+#endif
+#endif
+
 // number of buckets
 static const u32 NBUCKETS = 1<<BUCKBITS;
 // 2_log of number of slots per bucket
 static const u32 SLOTBITS = RESTBITS+1+1;
+static const u32 SLOTRANGE = 1<<SLOTBITS;
 // number of slots per bucket
-static const u32 NSLOTS = 1<<SLOTBITS;
+static const u32 NSLOTS = SLOTRANGE * SAVEMEM;
 // number of per-xhash slots
 static const u32 XFULL = 16;
 // SLOTBITS mask
-static const u32 SLOTMASK = NSLOTS-1;
+static const u32 SLOTMASK = SLOTRANGE-1;
 // number of possible values of xhash (rest of n) bits
 static const u32 NRESTS = 1<<RESTBITS;
 // number of blocks of hashes extracted from single 512 bit blake2b output
