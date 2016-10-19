@@ -41,4 +41,4 @@ spark:	equi1g
 	time ./equi1g
 
 clean:	
-	rm equi equi1 equi1g equi1445 eqcuda eqcuda1445 feqcuda verify
+	rm equi equi1 equi1g equi1445 eqcuda eqcuda1445 verify
