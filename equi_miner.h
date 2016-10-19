@@ -57,6 +57,7 @@ static const u32 NBUCKETS = 1<<BUCKBITS;
 // 2_log of number of slots per bucket
 static const u32 SLOTBITS = RESTBITS+1+1;
 static const u32 SLOTRANGE = 1<<SLOTBITS;
+static const u32 SLOTMSB = 1<<(SLOTBITS-1);
 // number of slots per bucket
 static const u32 NSLOTS = SLOTRANGE * SAVEMEM;
 // number of per-xhash slots
@@ -73,17 +74,42 @@ static const u32 MAXSOLS = 8;
 // tree node identifying its children as two different slots in
 // a bucket on previous layer with the same rest bits (x-tra hash)
 struct tree {
-  unsigned bucketid : BUCKBITS;
-  unsigned slotid0  : SLOTBITS;
-  unsigned slotid1  : SLOTBITS;
+  u32 bid_s0_s1; // manual bitfields
 
-// layer 0 has no children bit needs to encode index
-  u32 getindex() const {
-    return (bucketid << SLOTBITS) | slotid0;
+  tree(const u32 idx) {
+    bid_s0_s1 = idx;
   }
-  void setindex(const u32 idx) {
-    slotid0 = idx & SLOTMASK;
-    bucketid = idx >> SLOTBITS;
+  tree(const u32 bid, const u32 s0, const u32 s1) {
+#ifdef SLOTDIFF
+    u32 ds10 = (s1 - s0) & SLOTMASK;
+    if (ds10 & SLOTMSB) {
+      bid_s0_s1 = (((bid << SLOTBITS) | s1) << (SLOTBITS-1)) | (SLOTMASK & ~ds10);
+    } else {
+      bid_s0_s1 = (((bid << SLOTBITS) | s0) << (SLOTBITS-1)) | (ds10 - 1);
+    }
+#else
+    bid_s0_s1 = (((bid << SLOTBITS) | s0) << SLOTBITS) | s1;
+#endif
+  }
+  u32 getindex() const {
+    return bid_s0_s1;
+  }
+  u32 bucketid() const {
+    return bid_s0_s1 >> (32 - BUCKBITS);
+  }
+  u32 slotid0() const {
+#ifdef SLOTDIFF
+    return (bid_s0_s1 >> (SLOTBITS-1)) & SLOTMASK;
+#else
+    return (bid_s0_s1 >> SLOTBITS) & SLOTMASK;
+#endif
+  }
+  u32 slotid1() const {
+#ifdef SLOTDIFF
+    return (slotid0() + 1 + (bid_s0_s1 & (SLOTMASK>>1))) & SLOTMASK;
+#else
+    return bid_s0_s1 & SLOTMASK;
+#endif
   }
 };
 
@@ -230,19 +256,19 @@ struct equi {
       *indices = t.getindex();
       return;
     }
-    const bucket1 &buck = hta.trees1[--r/2][t.bucketid];
+    const bucket1 &buck = hta.trees1[--r/2][t.bucketid()];
     const u32 size = 1 << r;
     u32 *indices1 = indices + size;
-    listindices1(r, buck[t.slotid0].attr, indices);
-    listindices1(r, buck[t.slotid1].attr, indices1);
+    listindices1(r, buck[t.slotid0()].attr, indices);
+    listindices1(r, buck[t.slotid1()].attr, indices1);
     orderindices(indices, size);
   }
   void listindices1(u32 r, const tree t, u32 *indices) {
-    const bucket0 &buck = hta.trees0[--r/2][t.bucketid];
+    const bucket0 &buck = hta.trees0[--r/2][t.bucketid()];
     const u32 size = 1 << r;
     u32 *indices1 = indices + size;
-    listindices0(r, buck[t.slotid0].attr, indices);
-    listindices0(r, buck[t.slotid1].attr, indices1);
+    listindices0(r, buck[t.slotid0()].attr, indices);
+    listindices0(r, buck[t.slotid1()].attr, indices1);
     orderindices(indices, size);
   }
   void candidate(const tree t) {
@@ -424,10 +450,8 @@ struct equi {
           bfull++;
           continue;
         }
-        tree leaf;
-        leaf.setindex(block*HASHESPERBLAKE+i);
         slot0 &s = hta.trees0[0][bucketid][slot];
-        s.attr = leaf;
+        s.attr = tree(block * HASHESPERBLAKE + i);
         memcpy(s.hash->bytes+htl.nextbo, ph+WN/8-hashbytes, hashbytes);
       }
     }
@@ -473,10 +497,8 @@ struct equi {
             bfull++;
             continue;
           }
-          tree xort; xort.bucketid = bucketid;
-          xort.slotid0 = s0; xort.slotid1 = s1;
           slot1 &xs = htl.hta.trees1[r/2][xorbucketid][xorslot];
-          xs.attr = xort;
+          xs.attr = tree(bucketid, s0 , s1);
           for (u32 i=htl.dunits; i < htl.prevhashunits; i++)
             xs.hash[i-htl.dunits].word = pslot0->hash[i].word ^ pslot1->hash[i].word;
         }
@@ -524,10 +546,8 @@ struct equi {
             bfull++;
             continue;
           }
-          tree xort; xort.bucketid = bucketid;
-          xort.slotid0 = s0; xort.slotid1 = s1;
           slot0 &xs = htl.hta.trees0[r/2][xorbucketid][xorslot];
-          xs.attr = xort;
+          xs.attr = tree(bucketid, s0 , s1);
           for (u32 i=htl.dunits; i < htl.prevhashunits; i++)
             xs.hash[i-htl.dunits].word = pslot0->hash[i].word ^ pslot1->hash[i].word;
         }
@@ -549,11 +569,8 @@ struct equi {
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const slot0 *pslot0 = buck + s0;
-          if (htl.equal(pslot0->hash, pslot1->hash)) {
-            tree xort; xort.bucketid = bucketid;
-            xort.slotid0 = s0; xort.slotid1 = s1;
-            candidate(xort);
-          }
+          if (htl.equal(pslot0->hash, pslot1->hash))
+            candidate(tree(bucketid, s0, s1));
         }
       }
     }
