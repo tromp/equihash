@@ -1,7 +1,7 @@
 // Wagner's algorithm for Generalized Birthday Paradox, a memory-hard proof-of-work
 // Copyright (c) 2016 John Tromp
 
-#include "equi_miner.h"
+#include "dev_miner.h"
 #include <unistd.h>
 
 int main(int argc, char **argv) {
