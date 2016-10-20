@@ -11,7 +11,7 @@ equi1:	equi.h equi_miner.h equi_miner.cpp Makefile
 	$(GPP) equi_miner.cpp blake/blake2b.cpp -o equi1
 
 equi1g:	equi.h equi_miner.h equi_miner.cpp Makefile
-	g++ -g -DLOGSPARK -DSPARKSCALE=11 equi_miner.cpp blake/blake2b.cpp -pthread -o equi1g
+	g++ -g -std=c++11 -DLOGSPARK -DSPARKSCALE=11 equi_miner.cpp blake/blake2b.cpp -pthread -o equi1g
 
 equi1445:	equi.h equi_miner.h equi_miner.cpp Makefile
 	$(GPP) -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp -o equi1445
@@ -43,8 +43,8 @@ verify:	equi.h equi.c Makefile
 bench:	equi1
 	time ./equi1 -r 10
 
-test:	equi verify Makefile
-	time ./equi -h "" -n 0 -t 1 -s | grep ^Sol | ./verify -h "" -n 0
+test:	equi1 verify Makefile
+	time ./equi1 -h "" -n 0 -t 1 -s | grep ^Sol | ./verify -h "" -n 0
 
 spark:	equi1g
 	time ./equi1g
