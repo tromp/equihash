@@ -310,13 +310,11 @@ struct equi {
     u32 nexthtunits;
     u32 dunits;
     u32 prevbo;
-    u32 nextbo;
   
     htlayout(equi *eq, u32 r): hta(eq->hta), prevhtunits(0), dunits(0) {
       u32 nexthashbytes = hashsize(r);
       nexthtunits = hashwords(nexthashbytes);
       prevbo = 0;
-      nextbo = nexthtunits * sizeof(htunit) - nexthashbytes; // 0-3
       if (r) {
         u32 prevhashbytes = hashsize(r-1);
         prevhtunits = hashwords(prevhashbytes);
@@ -448,9 +446,9 @@ struct equi {
           bfull++;
           continue;
         }
-        htunit *s = hta.heap0[bucketid][slot]; // TRY OFFSETTING BY htl.nexthtunits
-        memcpy(s->bytes+htl.nextbo, ph+WN/8-hashbytes, hashbytes);
-        s[htl.nexthtunits].tag = tree(block * HASHESPERBLAKE + i);
+        htunit *s = hta.heap0[bucketid][slot] + htl.nexthtunits;
+        memcpy(s->bytes-hashbytes, ph+WN/8-hashbytes, hashbytes);
+        s->tag = tree(block * HASHESPERBLAKE + i);
       }
     }
   }
@@ -460,10 +458,10 @@ struct equi {
     collisiondata cd;
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      slot0 *buck = htl.hta.heap0[bucketid]; // optimize by updating previous buck?!
-      u32 bsize = getnslots(r-1, bucketid);       // optimize by putting bucketsize with block?!
+      slot0 *buck = htl.hta.heap0[bucketid];
+      u32 bsize = getnslots(r-1, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *slot1 = buck[s1];          // optimize by updating previous slot1?!
+        const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, htl.getxhash0(slot1))) {
           xfull++;
           continue;
@@ -500,8 +498,8 @@ struct equi {
           }
           htunit *xs = htl.hta.heap1[xorbucketid][xorslot];
           for (u32 i=htl.dunits; i < htl.prevhtunits; i++)
-            xs[i-htl.dunits].word = slot0[i].word ^ slot1[i].word;
-          xs[htl.nexthtunits].tag = tree(bucketid, s0, s1);
+            xs++->word = slot0[i].word ^ slot1[i].word;
+          xs->tag = tree(bucketid, s0, s1);
         }
       }
     }
@@ -512,10 +510,10 @@ struct equi {
     collisiondata cd;
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      slot1 *buck = htl.hta.heap1[bucketid]; // OPTIMIZE BY UPDATING PREVIOUS
+      slot1 *buck = htl.hta.heap1[bucketid];
       u32 bsize = getnslots(r-1, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *slot1 = buck[s1];          // OPTIMIZE BY UPDATING PREVIOUS
+        const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, htl.getxhash1(slot1))) {
           xfull++;
           continue;
@@ -552,8 +550,8 @@ struct equi {
           }
           htunit *xs = htl.hta.heap0[xorbucketid][xorslot];
           for (u32 i=htl.dunits; i < htl.prevhtunits; i++)
-            xs[i-htl.dunits].word = slot0[i].word ^ slot1[i].word;
-          xs[htl.nexthtunits].tag = tree(bucketid, s0, s1);
+            xs++->word = slot0[i].word ^ slot1[i].word;
+          xs->tag = tree(bucketid, s0, s1);
         }
       }
     }
