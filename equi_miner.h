@@ -219,15 +219,28 @@ struct equi {
     memset(nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
     nsols = xfull = bfull = hfull = 0;
   }
-  u32 getslot(const u32 r, const u32 bucketi) {
+  u32 getslot0(const u32 bucketi) {
 #ifdef ATOMIC
-    return std::atomic_fetch_add_explicit(&nslots[r&1][bucketi], 1U, std::memory_order_relaxed);
+    return std::atomic_fetch_add_explicit(&nslots[0][bucketi], 1U, std::memory_order_relaxed);
 #else
-    return nslots[r&1][bucketi]++;
+    return nslots[0][bucketi]++;
 #endif
   }
-  u32 getnslots(const u32 r, const u32 bid) { // SHOULD BE METHOD IN BUCKET STRUCT
-    au32 &nslot = nslots[r&1][bid];
+  u32 getslot1(const u32 bucketi) {
+#ifdef ATOMIC
+    return std::atomic_fetch_add_explicit(&nslots[1][bucketi], 1U, std::memory_order_relaxed);
+#else
+    return nslots[1][bucketi]++;
+#endif
+  }
+  u32 getnslots0(const u32 bid) {
+    au32 &nslot = nslots[0][bid];
+    const u32 n = min(nslot, NSLOTS);
+    nslot = 0;
+    return n;
+  }
+  u32 getnslots1(const u32 bid) {
+    au32 &nslot = nslots[1][bid];
     const u32 n = min(nslot, NSLOTS);
     nslot = 0;
     return n;
@@ -453,7 +466,7 @@ struct equi {
 #else
 #error not implemented
 #endif
-        const u32 slot = getslot(0, bucketid);
+        const u32 slot = getslot0(bucketid);
         if (slot >= NSLOTS) {
           bfull++;
           continue;
@@ -471,7 +484,7 @@ struct equi {
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot0 *buck = htl.hta.heap0[bucketid];
-      u32 bsize = getnslots(r-1, bucketid);
+      u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, htl.getxhash0(slot1))) {
@@ -503,7 +516,7 @@ struct equi {
 #else
 #error not implemented
 #endif
-          const u32 xorslot = getslot(r, xorbucketid);
+          const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
@@ -523,7 +536,7 @@ struct equi {
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot1 *buck = htl.hta.heap1[bucketid];
-      u32 bsize = getnslots(r-1, bucketid);
+      u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, htl.getxhash1(slot1))) {
@@ -555,7 +568,7 @@ struct equi {
 #else
 #error not implemented
 #endif
-          const u32 xorslot = getslot(r, xorbucketid);
+          const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
@@ -575,7 +588,7 @@ struct equi {
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot0 *buck = heaps.heap0[bucketid];
-      u32 bsize = getnslots(0, bucketid);
+      u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, (slot1->bytes[0] & 0xf) << 4 | slot1->bytes[0+1] >> 4)) {
@@ -591,8 +604,8 @@ struct equi {
           }
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
           u32 xorbucketid = (((u32)(bytes0[0+1] ^ bytes1[0+1]) & 0xf) << 8)
-                             | (bytes0[0+2] ^ bytes1[0+2]);
-          const u32 xorslot = getslot(1, xorbucketid);
+                                 | (bytes0[0+2] ^ bytes1[0+2]);
+          const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
@@ -613,7 +626,7 @@ struct equi {
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot1 *buck = heaps.heap1[bucketid];
-      u32 bsize = getnslots(1, bucketid);
+      u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, slot1->bytes[3])) {
@@ -629,8 +642,8 @@ struct equi {
           }
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
           u32 xorbucketid = ((u32)(bytes0[3+1] ^ bytes1[3+1]) << 4)
-                            | (bytes0[3+2] ^ bytes1[3+2]) >> 4;
-          const u32 xorslot = getslot(2, xorbucketid);
+                                | (bytes0[3+2] ^ bytes1[3+2]) >> 4;
+          const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
@@ -651,7 +664,7 @@ struct equi {
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot0 *buck = heaps.heap0[bucketid];
-      u32 bsize = getnslots(2, bucketid);
+      u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, (slot1->bytes[1] & 0xf) << 4 | slot1->bytes[1+1] >> 4)) {
@@ -667,8 +680,8 @@ struct equi {
           }
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
           u32 xorbucketid = (((u32)(bytes0[1+1] ^ bytes1[1+1]) & 0xf) << 8)
-                             | (bytes0[1+2] ^ bytes1[1+2]);
-          const u32 xorslot = getslot(3, xorbucketid);
+                                 | (bytes0[1+2] ^ bytes1[1+2]);
+          const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
@@ -688,7 +701,7 @@ struct equi {
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot1 *buck = heaps.heap1[bucketid];
-      u32 bsize = getnslots(3, bucketid);
+      u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, slot1->bytes[0])) {
@@ -704,8 +717,8 @@ struct equi {
           }
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
           u32 xorbucketid = ((u32)(bytes0[0+1] ^ bytes1[0+1]) << 4)
-                             | (bytes0[0+2] ^ bytes1[0+2]) >> 4;
-          const u32 xorslot = getslot(4, xorbucketid);
+                                | (bytes0[0+2] ^ bytes1[0+2]) >> 4;
+          const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
@@ -725,7 +738,7 @@ struct equi {
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot0 *buck = heaps.heap0[bucketid];
-      u32 bsize = getnslots(4, bucketid);
+      u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, (slot1->bytes[2] & 0xf) << 4 | slot1->bytes[2+1] >> 4)) {
@@ -741,8 +754,8 @@ struct equi {
           }
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
           u32 xorbucketid = (((u32)(bytes0[2+1] ^ bytes1[2+1]) & 0xf) << 8)
-                             | (bytes0[2+2] ^ bytes1[2+2]);
-          const u32 xorslot = getslot(5, xorbucketid);
+                                 | (bytes0[2+2] ^ bytes1[2+2]);
+          const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
@@ -762,7 +775,7 @@ struct equi {
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot1 *buck = heaps.heap1[bucketid];
-      u32 bsize = getnslots(5, bucketid);
+      u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, slot1->bytes[1])) {
@@ -778,8 +791,8 @@ struct equi {
           }
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
           u32 xorbucketid = ((u32)(bytes0[1+1] ^ bytes1[1+1]) << 4)
-                             | (bytes0[1+2] ^ bytes1[1+2]) >> 4;
-          const u32 xorslot = getslot(6, xorbucketid);
+                                | (bytes0[1+2] ^ bytes1[1+2]) >> 4;
+          const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
@@ -799,7 +812,7 @@ struct equi {
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot0 *buck = heaps.heap0[bucketid];
-      u32 bsize = getnslots(6, bucketid);
+      u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, (slot1->bytes[3] & 0xf) << 4 | slot1->bytes[3+1] >> 4)) {
@@ -815,8 +828,8 @@ struct equi {
           }
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
           u32 xorbucketid = (((u32)(bytes0[3+1] ^ bytes1[3+1]) & 0xf) << 8)
-                             | (bytes0[3+2] ^ bytes1[3+2]);
-          const u32 xorslot = getslot(7, xorbucketid);
+                                 | (bytes0[3+2] ^ bytes1[3+2]);
+          const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
@@ -835,7 +848,7 @@ struct equi {
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot1 *buck = heaps.heap1[bucketid];
-      u32 bsize = getnslots(7, bucketid);
+      u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, slot1->bytes[2])) {
@@ -851,8 +864,8 @@ struct equi {
           }
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
           u32 xorbucketid = ((u32)(bytes0[2+1] ^ bytes1[2+1]) << 4)
-                             | (bytes0[2+2] ^ bytes1[2+2]) >> 4;
-          const u32 xorslot = getslot(8, xorbucketid);
+                                | (bytes0[2+2] ^ bytes1[2+2]) >> 4;
+          const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
@@ -872,7 +885,7 @@ struct equi {
     for (u32 bucketid = id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot0 *buck = htl.hta.heap0[bucketid];
-      u32 bsize = getnslots(WK-1, bucketid);
+      u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, htl.getxhash0(slot1))) // assume WK odd
