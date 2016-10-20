@@ -53,6 +53,8 @@ typedef u32 au32;
 
 // number of buckets
 static const u32 NBUCKETS = 1<<BUCKBITS;
+// bucket mask
+static const u32 BUCKMASK = NBUCKETS-1;
 // 2_log of number of slots per bucket
 static const u32 SLOTBITS = RESTBITS+1+1;
 static const u32 SLOTRANGE = 1<<SLOTBITS;
@@ -591,7 +593,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, (slot1->bytes[0] & 0xf) << 4 | slot1->bytes[0+1] >> 4)) {
+        if (!cd.addslot(s1, __builtin_bswap32(slot1->word) >> 20 & 0xff)) {
           xfull++;
           continue;
         }
@@ -602,9 +604,7 @@ struct equi {
             hfull++;
             continue;
           }
-          const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          u32 xorbucketid = (((u32)(bytes0[0+1] ^ bytes1[0+1]) & 0xf) << 8)
-                                 | (bytes0[0+2] ^ bytes1[0+2]);
+          u32 xorbucketid = __builtin_bswap32(slot0->word ^ slot1->word) >> 8 & BUCKMASK;
           const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -640,9 +640,7 @@ struct equi {
             hfull++;
             continue;
           }
-          const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          u32 xorbucketid = ((u32)(bytes0[3+1] ^ bytes1[3+1]) << 4)
-                                | (bytes0[3+2] ^ bytes1[3+2]) >> 4;
+          u32 xorbucketid = __builtin_bswap32(slot0[1].word ^ slot1[1].word) >> 20;
           const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -667,7 +665,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, (slot1->bytes[1] & 0xf) << 4 | slot1->bytes[1+1] >> 4)) {
+        if (!cd.addslot(s1, __builtin_bswap32(slot1->word) >> 12 & 0xff)) {
           xfull++;
           continue;
         }
@@ -678,9 +676,7 @@ struct equi {
             hfull++;
             continue;
           }
-          const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          u32 xorbucketid = (((u32)(bytes0[1+1] ^ bytes1[1+1]) & 0xf) << 8)
-                                 | (bytes0[1+2] ^ bytes1[1+2]);
+          u32 xorbucketid = __builtin_bswap32(slot0[0].word ^ slot1[0].word) & BUCKMASK;
           const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -715,9 +711,7 @@ struct equi {
             hfull++;
             continue;
           }
-          const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          u32 xorbucketid = ((u32)(bytes0[0+1] ^ bytes1[0+1]) << 4)
-                                | (bytes0[0+2] ^ bytes1[0+2]) >> 4;
+          u32 xorbucketid = __builtin_bswap32(slot0[0].word ^ slot1[0].word) >> 12 & BUCKMASK;
           const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -741,7 +735,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, (slot1->bytes[2] & 0xf) << 4 | slot1->bytes[2+1] >> 4)) {
+        if (!cd.addslot(s1, __builtin_bswap32(slot1->word) >> 4 & 0xff)) {
           xfull++;
           continue;
         }
@@ -789,9 +783,7 @@ struct equi {
             hfull++;
             continue;
           }
-          const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          u32 xorbucketid = ((u32)(bytes0[1+1] ^ bytes1[1+1]) << 4)
-                                | (bytes0[1+2] ^ bytes1[1+2]) >> 4;
+          u32 xorbucketid = __builtin_bswap32(slot0[0].word ^ slot1[0].word) >> 4 & BUCKMASK;
           const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -826,9 +818,7 @@ struct equi {
             hfull++;
             continue;
           }
-          const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          u32 xorbucketid = (((u32)(bytes0[3+1] ^ bytes1[3+1]) & 0xf) << 8)
-                                 | (bytes0[3+2] ^ bytes1[3+2]);
+          u32 xorbucketid = __builtin_bswap32(slot0[1].word ^ slot1[1].word) >> 16 & BUCKMASK;
           const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
