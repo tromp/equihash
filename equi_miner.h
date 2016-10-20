@@ -20,7 +20,6 @@
 
 #include "equi.h"
 #include <stdio.h>
-#include <stdlib.h>
 #include <pthread.h>
 #include <assert.h>
 
@@ -202,6 +201,7 @@ struct equi {
   pthread_barrier_t barry;
   equi(const u32 n_threads) {
     assert(sizeof(htunit) == 4);
+    assert(WK&1); // assumed in candidate() calling indices1()
     nthreads = n_threads;
     const int err = pthread_barrier_init(&barry, NULL, nthreads);
     assert(!err);
@@ -232,70 +232,61 @@ struct equi {
     nslot = 0;
     return n;
   }
-  void orderindices(u32 *indices, u32 size) {
-    if (indices[0] > indices[size]) {
-      for (u32 i=0; i < size; i++) {
-        const u32 tmp = indices[i];
-        indices[i] = indices[size+i];
-        indices[size+i] = tmp;
+  // if merged != 0, mergesort indices and return true if dupe found
+  // if merged == 0, order indices as in Wagner condition
+  bool orderindices(u32 *indices, u32 size, u32 *merged) {
+    if (merged) {
+      u32 i = 0, j = 0, k;
+      for (k = 0; i<size && j<size; k++) {
+        if (indices[i] == indices[size+j]) return true;
+        merged[k] = indices[i] < indices[size+j] ? indices[i++] : indices[size+j++];
       }
+      memcpy(merged+k, indices+i, (size-i) * sizeof(u32));
+      memcpy(indices,  merged,    (size+j) * sizeof(u32));
+      return false;
+    } else {
+      if (indices[0] > indices[size]) {
+        for (u32 i=0; i < size; i++) {
+          const u32 tmp = indices[i];
+          indices[i] = indices[size+i];
+          indices[size+i] = tmp;
+        }
+      }
+      return false;
     }
   }
   // return true if dupe found
-  bool listindices0(u32 r, const tree t, u32 *indices, u16 *dupes) {
+  bool listindices0(u32 r, const tree t, u32 *indices, u32 *merged) {
     if (r == 0) {
-      u32 idx = t.getindex();
-      if (dupes) {
-        u32 bin = idx & (PROOFSIZE-1);
-        u16 msb = idx >> WK;
-        if (msb == dupes[bin])
-          return true;
-        dupes[bin] = msb;
-      }
-      *indices = idx;
+      *indices = t.getindex();
       return false;
     }
     const slot1 *buck = hta.heap1[t.bucketid()];
     const u32 size = 1 << --r;
     u32 *indices1 = indices + size;
     u32 tagi = hashwords(hashsize(r));
-    if (listindices1(r, buck[t.slotid0()][tagi].tag, indices, dupes)
-     || listindices1(r, buck[t.slotid1()][tagi].tag, indices1, dupes))
-      return true;;
-    orderindices(indices, size);
-    return false;
+    return listindices1(r, buck[t.slotid0()][tagi].tag, indices, merged)
+        || listindices1(r, buck[t.slotid1()][tagi].tag, indices1, merged)
+        || orderindices(indices, size, merged);
   }
-  bool listindices1(u32 r, const tree t, u32 *indices, u16 *dupes) {
+  bool listindices1(u32 r, const tree t, u32 *indices, u32 *merged) {
     const slot0 *buck = hta.heap0[t.bucketid()];
     const u32 size = 1 << --r;
     u32 *indices1 = indices + size;
     u32 tagi = hashwords(hashsize(r));
-    if (listindices0(r, buck[t.slotid0()][tagi].tag, indices, dupes)
-     || listindices0(r, buck[t.slotid1()][tagi].tag, indices1, dupes))
-      return true;
-    orderindices(indices, size);
-    return false;
+    return listindices0(r, buck[t.slotid0()][tagi].tag, indices, merged)
+        || listindices0(r, buck[t.slotid1()][tagi].tag, indices1, merged)
+        || orderindices(indices, size, merged);
   }
   void candidate(const tree t) {
-    proof prf;
-    u16 dupes[PROOFSIZE];
-    memset(dupes, 0xffff, PROOFSIZE * sizeof(u16));
-    if (listindices1(WK, t, prf, dupes)) // assume WK odd
-      return;
-    qsort(prf, PROOFSIZE, sizeof(u32), &compu32);
-    for (u32 i=1; i<PROOFSIZE; i++)
-      if (prf[i] <= prf[i-1])
-        return;
+    proof prf, merged;
+    if (listindices1(WK, t, prf, merged)) return;
 #ifdef ATOMIC
     u32 soli = std::atomic_fetch_add_explicit(&nsols, 1U, std::memory_order_relaxed);
 #else
     u32 soli = nsols++;
 #endif
-    memset(dupes, 0xffff, PROOFSIZE * sizeof(u16));
-    if (soli < MAXSOLS) {
-      bool dupe = listindices1(WK, t, sols[soli], dupes); // assume WK odd
-      assert(!dupe);
-    }
+    if (soli < MAXSOLS) listindices1(WK, t, sols[soli], 0);
   }
   void showbsizes(u32 r) {
     printf(" x%d b%d h%d\n", xfull, bfull, hfull);
@@ -579,307 +570,294 @@ struct equi {
   }
   
   void digit1(const u32 id) {
-    htlayout htl(this, 1);
+    htalloc heaps = hta;
     collisiondata cd;
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      slot0 *buck = htl.hta.heap0[bucketid];
+      slot0 *buck = heaps.heap0[bucketid];
       u32 bsize = getnslots(0, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htl.getxhash0(slot1))) {
+        if (!cd.addslot(s1, (slot1->bytes[0] & 0xf) << 4 | slot1->bytes[0+1] >> 4)) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
-          if (htl.equal(slot0, slot1)) {
+          if (slot0[5].word == slot1[5].word) {
             hfull++;
             continue;
           }
-          u32 xorbucketid;
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          xorbucketid = (((u32)(bytes0[0+1] ^ bytes1[0+1]) & 0xf) << 8)
+          u32 xorbucketid = (((u32)(bytes0[0+1] ^ bytes1[0+1]) & 0xf) << 8)
                              | (bytes0[0+2] ^ bytes1[0+2]);
           const u32 xorslot = getslot(1, xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap1[xorbucketid][xorslot];
-          xs++->word = slot0[0].word ^ slot1[0].word;
-          xs++->word = slot0[1].word ^ slot1[1].word;
-          xs++->word = slot0[2].word ^ slot1[2].word;
-          xs++->word = slot0[3].word ^ slot1[3].word;
-          xs++->word = slot0[4].word ^ slot1[4].word;
-          xs++->word = slot0[5].word ^ slot1[5].word;
-          xs->tag = tree(bucketid, s0, s1);
+          u64 *x  = (u64 *)heaps.heap1[xorbucketid][xorslot];
+          u64 *x0 = (u64 *)slot0, *x1 = (u64 *)slot1;
+          *x++ = x0[0] ^ x1[0];
+          *x++ = x0[1] ^ x1[1];
+          *x++ = x0[2] ^ x1[2];
+          ((htunit *)x)->tag = tree(bucketid, s0, s1);
         }
       }
     }
   }
   void digit2(const u32 id) {
-    htlayout htl(this, 2);
+    htalloc heaps = hta;
     collisiondata cd;
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      slot1 *buck = htl.hta.heap1[bucketid];
+      slot1 *buck = heaps.heap1[bucketid];
       u32 bsize = getnslots(1, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htl.getxhash1(slot1))) {
+        if (!cd.addslot(s1, slot1->bytes[3])) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
-          if (htl.equal(slot0, slot1)) {
+          if (slot0[5].word == slot1[5].word) {
             hfull++;
             continue;
           }
-          u32 xorbucketid;
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          xorbucketid = ((u32)(bytes0[3+1] ^ bytes1[3+1]) << 4)
+          u32 xorbucketid = ((u32)(bytes0[3+1] ^ bytes1[3+1]) << 4)
                             | (bytes0[3+2] ^ bytes1[3+2]) >> 4;
           const u32 xorslot = getslot(2, xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap0[xorbucketid][xorslot];
+          htunit *xs = heaps.heap0[xorbucketid][xorslot];
           xs++->word = slot0[1].word ^ slot1[1].word;
-          xs++->word = slot0[2].word ^ slot1[2].word;
-          xs++->word = slot0[3].word ^ slot1[3].word;
-          xs++->word = slot0[4].word ^ slot1[4].word;
-          xs++->word = slot0[5].word ^ slot1[5].word;
-          xs->tag = tree(bucketid, s0, s1);
+          u64 *x = (u64 *)xs, *x0 = (u64 *)slot0, *x1 = (u64 *)slot1;
+          *x++ = x0[1] ^ x1[1];
+          *x++ = x0[2] ^ x1[2];
+          ((htunit *)x)->tag = tree(bucketid, s0, s1);
         }
       }
     }
   }
   void digit3(const u32 id) {
-    htlayout htl(this, 3);
+    htalloc heaps = hta;
     collisiondata cd;
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      slot0 *buck = htl.hta.heap0[bucketid];
+      slot0 *buck = heaps.heap0[bucketid];
       u32 bsize = getnslots(2, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htl.getxhash0(slot1))) {
+        if (!cd.addslot(s1, (slot1->bytes[1] & 0xf) << 4 | slot1->bytes[1+1] >> 4)) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
-          if (htl.equal(slot0, slot1)) {
+          if (slot0[4].word == slot1[4].word) {
             hfull++;
             continue;
           }
-          u32 xorbucketid;
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          xorbucketid = (((u32)(bytes0[1+1] ^ bytes1[1+1]) & 0xf) << 8)
+          u32 xorbucketid = (((u32)(bytes0[1+1] ^ bytes1[1+1]) & 0xf) << 8)
                              | (bytes0[1+2] ^ bytes1[1+2]);
           const u32 xorslot = getslot(3, xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap1[xorbucketid][xorslot];
-          xs++->word = slot0[1].word ^ slot1[1].word;
-          xs++->word = slot0[2].word ^ slot1[2].word;
-          xs++->word = slot0[3].word ^ slot1[3].word;
-          xs++->word = slot0[4].word ^ slot1[4].word;
-          xs->tag = tree(bucketid, s0, s1);
+          u64 *x  = (u64 *)heaps.heap1[xorbucketid][xorslot];
+          u64 *x0 = (u64 *)(slot0+1), *x1 = (u64 *)(slot1+1);
+          *x++ = x0[0] ^ x1[0];
+          *x++ = x0[1] ^ x1[1];
+          ((htunit *)x)->tag = tree(bucketid, s0, s1);
         }
       }
     }
   }
   void digit4(const u32 id) {
-    htlayout htl(this, 4);
+    htalloc heaps = hta;
     collisiondata cd;
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      slot1 *buck = htl.hta.heap1[bucketid];
+      slot1 *buck = heaps.heap1[bucketid];
       u32 bsize = getnslots(3, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htl.getxhash1(slot1))) {
+        if (!cd.addslot(s1, slot1->bytes[0])) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
-          if (htl.equal(slot0, slot1)) {
+          if (slot0[3].word == slot1[3].word) {
             hfull++;
             continue;
           }
-          u32 xorbucketid;
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-           xorbucketid = ((u32)(bytes0[0+1] ^ bytes1[0+1]) << 4)
+          u32 xorbucketid = ((u32)(bytes0[0+1] ^ bytes1[0+1]) << 4)
                              | (bytes0[0+2] ^ bytes1[0+2]) >> 4;
           const u32 xorslot = getslot(4, xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap0[xorbucketid][xorslot];
-          xs++->word = slot0[0].word ^ slot1[0].word;
-          xs++->word = slot0[1].word ^ slot1[1].word;
-          xs++->word = slot0[2].word ^ slot1[2].word;
-          xs++->word = slot0[3].word ^ slot1[3].word;
-          xs->tag = tree(bucketid, s0, s1);
+          u64 *x  = (u64 *)heaps.heap0[xorbucketid][xorslot];
+          u64 *x0 = (u64 *)slot0, *x1 = (u64 *)slot1;
+          *x++ = x0[0] ^ x1[0];
+          *x++ = x0[1] ^ x1[1];
+          ((htunit *)x)->tag = tree(bucketid, s0, s1);
         }
       }
     }
   }
   void digit5(const u32 id) {
-    htlayout htl(this, 5);
+    htalloc heaps = hta;
     collisiondata cd;
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      slot0 *buck = htl.hta.heap0[bucketid];
+      slot0 *buck = heaps.heap0[bucketid];
       u32 bsize = getnslots(4, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htl.getxhash0(slot1))) {
+        if (!cd.addslot(s1, (slot1->bytes[2] & 0xf) << 4 | slot1->bytes[2+1] >> 4)) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
-          if (htl.equal(slot0, slot1)) {
+          if (slot0[3].word == slot1[3].word) {
             hfull++;
             continue;
           }
-          u32 xorbucketid;
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          xorbucketid = (((u32)(bytes0[2+1] ^ bytes1[2+1]) & 0xf) << 8)
+          u32 xorbucketid = (((u32)(bytes0[2+1] ^ bytes1[2+1]) & 0xf) << 8)
                              | (bytes0[2+2] ^ bytes1[2+2]);
           const u32 xorslot = getslot(5, xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap1[xorbucketid][xorslot];
+          htunit *xs = heaps.heap1[xorbucketid][xorslot];
           xs++->word = slot0[1].word ^ slot1[1].word;
-          xs++->word = slot0[2].word ^ slot1[2].word;
-          xs++->word = slot0[3].word ^ slot1[3].word;
-          xs->tag = tree(bucketid, s0, s1);
+          u64 *x = (u64 *)xs, *x0 = (u64 *)slot0, *x1 = (u64 *)slot1;
+          *x++ = x0[1] ^ x1[1];
+          ((htunit *)x)->tag = tree(bucketid, s0, s1);
         }
       }
     }
   }
   void digit6(const u32 id) {
-    htlayout htl(this, 6);
+    htalloc heaps = hta;
     collisiondata cd;
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      slot1 *buck = htl.hta.heap1[bucketid];
+      slot1 *buck = heaps.heap1[bucketid];
       u32 bsize = getnslots(5, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htl.getxhash1(slot1))) {
+        if (!cd.addslot(s1, slot1->bytes[1])) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
-          if (htl.equal(slot0, slot1)) {
+          if (slot0[2].word == slot1[2].word) {
             hfull++;
             continue;
           }
-          u32 xorbucketid;
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-           xorbucketid = ((u32)(bytes0[1+1] ^ bytes1[1+1]) << 4)
+          u32 xorbucketid = ((u32)(bytes0[1+1] ^ bytes1[1+1]) << 4)
                              | (bytes0[1+2] ^ bytes1[1+2]) >> 4;
           const u32 xorslot = getslot(6, xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap0[xorbucketid][xorslot];
+          htunit *xs = heaps.heap0[xorbucketid][xorslot];
           xs++->word = slot0[0].word ^ slot1[0].word;
-          xs++->word = slot0[1].word ^ slot1[1].word;
-          xs++->word = slot0[2].word ^ slot1[2].word;
-          xs->tag = tree(bucketid, s0, s1);
+          u64 *x = (u64 *)xs, *x0 = (u64 *)(slot0+1), *x1 = (u64 *)(slot1+1);
+          *x++ = x0[0] ^ x1[0];
+          ((htunit *)x)->tag = tree(bucketid, s0, s1);
         }
       }
     }
   }
   void digit7(const u32 id) {
-    htlayout htl(this, 7);
+    htalloc heaps = hta;
     collisiondata cd;
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      slot0 *buck = htl.hta.heap0[bucketid];
+      slot0 *buck = heaps.heap0[bucketid];
       u32 bsize = getnslots(6, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htl.getxhash0(slot1))) {
+        if (!cd.addslot(s1, (slot1->bytes[3] & 0xf) << 4 | slot1->bytes[3+1] >> 4)) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
-          if (htl.equal(slot0, slot1)) {
+          if (slot0[2].word == slot1[2].word) {
             hfull++;
             continue;
           }
-          u32 xorbucketid;
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          xorbucketid = (((u32)(bytes0[3+1] ^ bytes1[3+1]) & 0xf) << 8)
+          u32 xorbucketid = (((u32)(bytes0[3+1] ^ bytes1[3+1]) & 0xf) << 8)
                              | (bytes0[3+2] ^ bytes1[3+2]);
           const u32 xorslot = getslot(7, xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap1[xorbucketid][xorslot];
-          xs++->word = slot0[1].word ^ slot1[1].word;
-          xs++->word = slot0[2].word ^ slot1[2].word;
-          xs->tag = tree(bucketid, s0, s1);
+          u64 *x  = (u64 *)heaps.heap1[xorbucketid][xorslot];
+          u64 *x0 = (u64 *)(slot0+1), *x1 = (u64 *)(slot1+1);
+          *x++ = x0[0] ^ x1[0];
+          ((htunit *)x)->tag = tree(bucketid, s0, s1);
         }
       }
     }
   }
   void digit8(const u32 id) {
-    htlayout htl(this, 8);
+    htalloc heaps = hta;
     collisiondata cd;
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      slot1 *buck = htl.hta.heap1[bucketid];
+      slot1 *buck = heaps.heap1[bucketid];
       u32 bsize = getnslots(7, bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htl.getxhash1(slot1))) {
+        if (!cd.addslot(s1, slot1->bytes[2])) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
-          if (htl.equal(slot0, slot1)) {
+          if (slot0[1].word == slot1[1].word) {
             hfull++;
             continue;
           }
-          u32 xorbucketid;
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-           xorbucketid = ((u32)(bytes0[2+1] ^ bytes1[2+1]) << 4)
+          u32 xorbucketid = ((u32)(bytes0[2+1] ^ bytes1[2+1]) << 4)
                              | (bytes0[2+2] ^ bytes1[2+2]) >> 4;
           const u32 xorslot = getslot(8, xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap0[xorbucketid][xorslot];
+          htunit *xs = heaps.heap0[xorbucketid][xorslot];
           xs++->word = slot0[1].word ^ slot1[1].word;
           xs->tag = tree(bucketid, s0, s1);
         }
@@ -901,7 +879,7 @@ struct equi {
           continue;
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          if (htl.equal(buck[s0], slot1)) {
+          if (htl.equal(buck[s0], slot1)) { // EASY OPTIMIZE
             candidate(tree(bucketid, s0, s1));
             nc++;
           }
