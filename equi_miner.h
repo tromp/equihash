@@ -590,7 +590,7 @@ nc++,       candidate(tree(bucketid, s0, s1));
         }
       }
     }
-printf(" %d candidates ", nc);
+// printf(" %d candidates ", nc);
   }
 };
 

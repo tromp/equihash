@@ -905,7 +905,7 @@ struct equi {
       }
     }
     free(dupes);
-    printf(" %d candidates ", nc);
+    // printf(" %d candidates ", nc);
   }
 };
 
