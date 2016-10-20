@@ -199,7 +199,6 @@ struct equi {
   u32 xfull;
   u32 bfull;
   u32 hfull;
-  u16 *dupes;
   pthread_barrier_t barry;
   equi(const u32 n_threads) {
     assert(sizeof(htunit) == 4);
@@ -243,14 +242,16 @@ struct equi {
     }
   }
   // return true if dupe found
-  bool listindices0(u32 r, const tree t, u32 *indices) {
+  bool listindices0(u32 r, const tree t, u32 *indices, u16 *dupes) {
     if (r == 0) {
       u32 idx = t.getindex();
-      u32 bin = idx & (PROOFSIZE-1);
-      u16 msb = idx >> WK;
-      if (msb == dupes[bin])
-        return true;
-      dupes[bin] = msb;
+      if (dupes) {
+        u32 bin = idx & (PROOFSIZE-1);
+        u16 msb = idx >> WK;
+        if (msb == dupes[bin])
+          return true;
+        dupes[bin] = msb;
+      }
       *indices = idx;
       return false;
     }
@@ -258,27 +259,28 @@ struct equi {
     const u32 size = 1 << --r;
     u32 *indices1 = indices + size;
     u32 tagi = hashwords(hashsize(r));
-    if (listindices1(r, buck[t.slotid0()][tagi].tag, indices)
-     || listindices1(r, buck[t.slotid1()][tagi].tag, indices1))
+    if (listindices1(r, buck[t.slotid0()][tagi].tag, indices, dupes)
+     || listindices1(r, buck[t.slotid1()][tagi].tag, indices1, dupes))
       return true;;
     orderindices(indices, size);
     return false;
   }
-  bool listindices1(u32 r, const tree t, u32 *indices) {
+  bool listindices1(u32 r, const tree t, u32 *indices, u16 *dupes) {
     const slot0 *buck = hta.heap0[t.bucketid()];
     const u32 size = 1 << --r;
     u32 *indices1 = indices + size;
     u32 tagi = hashwords(hashsize(r));
-    if (listindices0(r, buck[t.slotid0()][tagi].tag, indices)
-     || listindices0(r, buck[t.slotid1()][tagi].tag, indices1))
+    if (listindices0(r, buck[t.slotid0()][tagi].tag, indices, dupes)
+     || listindices0(r, buck[t.slotid1()][tagi].tag, indices1, dupes))
       return true;
     orderindices(indices, size);
     return false;
   }
   void candidate(const tree t) {
-    memset(dupes, 0xffff, PROOFSIZE * sizeof(u16));
     proof prf;
-    if (listindices1(WK, t, prf)) // assume WK odd
+    u16 dupes[PROOFSIZE];
+    memset(dupes, 0xffff, PROOFSIZE * sizeof(u16));
+    if (listindices1(WK, t, prf, dupes)) // assume WK odd
       return;
     qsort(prf, PROOFSIZE, sizeof(u32), &compu32);
     for (u32 i=1; i<PROOFSIZE; i++)
@@ -289,8 +291,11 @@ struct equi {
 #else
     u32 soli = nsols++;
 #endif
-    if (soli < MAXSOLS)
-      listindices1(WK, t, sols[soli]); // assume WK odd
+    memset(dupes, 0xffff, PROOFSIZE * sizeof(u16));
+    if (soli < MAXSOLS) {
+      bool dupe = listindices1(WK, t, sols[soli], dupes); // assume WK odd
+      assert(!dupe);
+    }
   }
   void showbsizes(u32 r) {
     printf(" x%d b%d h%d\n", xfull, bfull, hfull);
@@ -886,7 +891,6 @@ struct equi {
     collisiondata cd;
     htlayout htl(this, WK);
     u32 nc = 0;
-    dupes = (u16 *)calloc(PROOFSIZE, sizeof(u16));
     for (u32 bucketid = id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
       slot0 *buck = htl.hta.heap0[bucketid];
@@ -904,7 +908,6 @@ struct equi {
         }
       }
     }
-    free(dupes);
     // printf(" %d candidates ", nc);
   }
 };
@@ -996,6 +999,7 @@ void *worker(void *vp) {
 #endif
   if (tp->id == 0)
     printf("Digit %d\n", WK);
+  barrier(&eq->barry);
   eq->digitK(tp->id);
   barrier(&eq->barry);
   pthread_exit(NULL);
