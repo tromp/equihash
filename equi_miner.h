@@ -23,6 +23,11 @@
 #include <pthread.h>
 #include <assert.h>
 
+#if defined __builtin_bswap32 && defined __LITTLE_ENDIAN
+#undef htobe32
+#define htobe32(x) __builtin_bswap32(x)
+#endif
+
 typedef uint16_t u16;
 typedef uint64_t u64;
 
@@ -593,7 +598,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, __builtin_bswap32(slot1->word) >> 20 & 0xff)) {
+        if (!cd.addslot(s1, htobe32(slot1->word) >> 20 & 0xff)) {
           xfull++;
           continue;
         }
@@ -604,7 +609,7 @@ struct equi {
             hfull++;
             continue;
           }
-          u32 xorbucketid = __builtin_bswap32(slot0->word ^ slot1->word) >> 8 & BUCKMASK;
+          u32 xorbucketid = htobe32(slot0->word ^ slot1->word) >> 8 & BUCKMASK;
           const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -640,7 +645,7 @@ struct equi {
             hfull++;
             continue;
           }
-          u32 xorbucketid = __builtin_bswap32(slot0[1].word ^ slot1[1].word) >> 20;
+          u32 xorbucketid = htobe32(slot0[1].word ^ slot1[1].word) >> 20;
           const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -665,7 +670,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, __builtin_bswap32(slot1->word) >> 12 & 0xff)) {
+        if (!cd.addslot(s1, htobe32(slot1->word) >> 12 & 0xff)) {
           xfull++;
           continue;
         }
@@ -676,7 +681,7 @@ struct equi {
             hfull++;
             continue;
           }
-          u32 xorbucketid = __builtin_bswap32(slot0[0].word ^ slot1[0].word) & BUCKMASK;
+          u32 xorbucketid = htobe32(slot0[0].word ^ slot1[0].word) & BUCKMASK;
           const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -711,7 +716,7 @@ struct equi {
             hfull++;
             continue;
           }
-          u32 xorbucketid = __builtin_bswap32(slot0[0].word ^ slot1[0].word) >> 12 & BUCKMASK;
+          u32 xorbucketid = htobe32(slot0[0].word ^ slot1[0].word) >> 12 & BUCKMASK;
           const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -735,7 +740,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, __builtin_bswap32(slot1->word) >> 4 & 0xff)) {
+        if (!cd.addslot(s1, htobe32(slot1->word) >> 4 & 0xff)) {
           xfull++;
           continue;
         }
@@ -746,16 +751,16 @@ struct equi {
             hfull++;
             continue;
           }
-          const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          u32 xorbucketid = (((u32)(bytes0[2+1] ^ bytes1[2+1]) & 0xf) << 8)
-                                 | (bytes0[2+2] ^ bytes1[2+2]);
+          u32 xor1 = slot0[1].word ^ slot1[1].word;
+          u32 xorbucketid = (((u32)(slot0->bytes[3] ^ slot1->bytes[3]) & 0xf)
+                               << 8) | (xor1 & 0xff);
           const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
           htunit *xs = heaps.heap1[xorbucketid][xorslot];
-          xs++->word = slot0[1].word ^ slot1[1].word;
+          xs++->word = xor1;
           u64 *x = (u64 *)xs, *x0 = (u64 *)slot0, *x1 = (u64 *)slot1;
           *x++ = x0[1] ^ x1[1];
           ((htunit *)x)->tag = tree(bucketid, s0, s1);
@@ -783,7 +788,7 @@ struct equi {
             hfull++;
             continue;
           }
-          u32 xorbucketid = __builtin_bswap32(slot0[0].word ^ slot1[0].word) >> 4 & BUCKMASK;
+          u32 xorbucketid = htobe32(slot0[0].word ^ slot1[0].word) >> 4 & BUCKMASK;
           const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -818,7 +823,7 @@ struct equi {
             hfull++;
             continue;
           }
-          u32 xorbucketid = __builtin_bswap32(slot0[1].word ^ slot1[1].word) >> 16 & BUCKMASK;
+          u32 xorbucketid = htobe32(slot0[1].word ^ slot1[1].word) >> 16 & BUCKMASK;
           const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -848,20 +853,20 @@ struct equi {
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
-          if (slot0[1].word == slot1[1].word) {
+          u32 xor1 = slot0[1].word ^ slot1[1].word;
+          if (!xor1) {
             hfull++;
             continue;
           }
-          const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
-          u32 xorbucketid = ((u32)(bytes0[2+1] ^ bytes1[2+1]) << 4)
-                                | (bytes0[2+2] ^ bytes1[2+2]) >> 4;
+          u32 xorbucketid = ((u32)(slot0->bytes[3] ^ slot1->bytes[3]) << 4)
+                          | (xor1 >> 4 & 0xf);
           const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
           htunit *xs = heaps.heap0[xorbucketid][xorslot];
-          xs++->word = slot0[1].word ^ slot1[1].word;
+          xs++->word = xor1;
           xs->tag = tree(bucketid, s0, s1);
         }
       }
