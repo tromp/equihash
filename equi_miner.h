@@ -252,7 +252,7 @@ struct equi {
     nslot = 0;
     return n;
   }
-#if 0 // merge sort not so performant after all
+#ifdef MERGESORT
   // if merged != 0, mergesort indices and return true if dupe found
   // if merged == 0, order indices as in Wagner condition
   bool orderindices(u32 *indices, u32 size, u32 *merged) {
@@ -286,7 +286,7 @@ struct equi {
     const u32 size = 1 << --r;
     u32 *indices1 = indices + size;
     u32 tagi = hashwords(hashsize(r));
-    return listindices1(r, buck[t.slotid0()][tagi].tag, indices, merged)
+    return listindices1(r, buck[t.slotid0()][tagi].tag, indices,  merged)
         || listindices1(r, buck[t.slotid1()][tagi].tag, indices1, merged)
         || orderindices(indices, size, merged);
   }
@@ -295,7 +295,7 @@ struct equi {
     const u32 size = 1 << --r;
     u32 *indices1 = indices + size;
     u32 tagi = hashwords(hashsize(r));
-    return listindices0(r, buck[t.slotid0()][tagi].tag, indices, merged)
+    return listindices0(r, buck[t.slotid0()][tagi].tag, indices,  merged)
         || listindices0(r, buck[t.slotid1()][tagi].tag, indices1, merged)
         || orderindices(indices, size, merged);
   }
@@ -310,7 +310,7 @@ struct equi {
     if (soli < MAXSOLS) listindices1(WK, t, sols[soli], 0);
   }
 #else
-  void orderindices(u32 *indices, u32 size) {
+  bool orderindices(u32 *indices, u32 size) {
     if (indices[0] > indices[size]) {
       for (u32 i=0; i < size; i++) {
         const u32 tmp = indices[i];
@@ -318,61 +318,48 @@ struct equi {
         indices[size+i] = tmp;
       }
     }
+    return false;
   }
-  bool listindices0(u32 r, const tree t, u32 *indices, u16 *dupes) {
+  // if dupes != 0, list indices in arbitrary order and return true if dupe found
+  // if dupes == 0, order indices as in Wagner condition
+  bool listindices0(u32 r, const tree t, u32 *indices, u32 *dupes) {
     if (r == 0) {
       u32 idx = t.getindex();
       if (dupes) {
         u32 bin = idx & (PROOFSIZE-1);
-        u16 msb = idx >> WK;
-        if (msb == dupes[bin])
-          return true;
-        dupes[bin] = msb;
+        if (idx == dupes[bin]) return true;
+        dupes[bin] = idx;
       }
       *indices = idx;
       return false;
     }
     const slot1 *buck = hta.heap1[t.bucketid()];
     const u32 size = 1 << --r;
-    u32 *indices1 = indices + size;
     u32 tagi = hashwords(hashsize(r));
-    if (listindices1(r, buck[t.slotid0()][tagi].tag, indices, dupes)
-     || listindices1(r, buck[t.slotid1()][tagi].tag, indices1, dupes))
-      return true;;
-    orderindices(indices, size);
-    return false;
+    return listindices1(r, buck[t.slotid0()][tagi].tag, indices,      dupes)
+        || listindices1(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
+        || (!dupes && orderindices(indices, size));
   }
-  bool listindices1(u32 r, const tree t, u32 *indices, u16 *dupes) {
+  bool listindices1(u32 r, const tree t, u32 *indices, u32 *dupes) {
     const slot0 *buck = hta.heap0[t.bucketid()];
     const u32 size = 1 << --r;
-    u32 *indices1 = indices + size;
     u32 tagi = hashwords(hashsize(r));
-    if (listindices0(r, buck[t.slotid0()][tagi].tag, indices, dupes)
-     || listindices0(r, buck[t.slotid1()][tagi].tag, indices1, dupes))
-      return true;
-    orderindices(indices, size);
-    return false;
+    return listindices0(r, buck[t.slotid0()][tagi].tag, indices,      dupes)
+        || listindices0(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
+        || (!dupes && orderindices(indices, size));
   }
   void candidate(const tree t) {
-    proof prf;
-    u16 dupes[PROOFSIZE];
-    memset(dupes, 0xffff, PROOFSIZE * sizeof(u16));
-    if (listindices1(WK, t, prf, dupes)) // assume WK odd
-      return;
+    proof prf, dupes;
+    memset(dupes, 0xffff, sizeof(proof));
+    if (listindices1(WK, t, prf, dupes)) return; // assume WK odd
     qsort(prf, PROOFSIZE, sizeof(u32), &compu32);
-    for (u32 i=1; i<PROOFSIZE; i++)
-      if (prf[i] <= prf[i-1])
-        return;
+    for (u32 i=1; i<PROOFSIZE; i++) if (prf[i] <= prf[i-1]) return;
 #ifdef ATOMIC
     u32 soli = std::atomic_fetch_add_explicit(&nsols, 1U, std::memory_order_relaxed);
 #else
     u32 soli = nsols++;
 #endif
-    memset(dupes, 0xffff, PROOFSIZE * sizeof(u16));
-    if (soli < MAXSOLS) {
-      bool dupe = listindices1(WK, t, sols[soli], dupes); // assume WK odd
-      assert(!dupe);
-    }
+    if (soli < MAXSOLS) listindices1(WK, t, sols[soli], 0); // assume WK odd
   }
 #endif
   void showbsizes(u32 r) {
@@ -961,7 +948,7 @@ struct equi {
         }
       }
     }
-    printf(" %d candidates ", nc);
+    // printf(" %d candidates ", nc);
   }
 };
 
