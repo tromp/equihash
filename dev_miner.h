@@ -23,11 +23,23 @@
 #include <pthread.h>
 #include <assert.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 void Blake2PrepareMidstate4(void *midstate, uchar *input);
+#ifdef __cplusplus
+}
+#endif
 //midstate: 256 bytes of buffer for output midstate, aligned by 32
 //input: 140 bytes header, preferably aligned by 8
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 void Blake2Run4(uchar *hashout, void *midstate, u32 indexctr);
+#ifdef __cplusplus
+}
+#endif
 //hashout: hash output buffer: 4*64 bytes
 //midstate: 256 bytes from Blake2PrepareMidstate4
 //indexctr: For n=200, k=9: {0, 4, 8, ..., 1048572}
