@@ -23,9 +23,21 @@
 #include <pthread.h>
 #include <assert.h>
 
+void Blake2PrepareMidstate4(void *midstate, uchar *input);
+//midstate: 256 bytes of buffer for output midstate, aligned by 32
+//input: 140 bytes header, preferably aligned by 8
+
+void Blake2Run4(uchar *hashout, void *midstate, u32 indexctr);
+//hashout: hash output buffer: 4*64 bytes
+//midstate: 256 bytes from Blake2PrepareMidstate4
+//indexctr: For n=200, k=9: {0, 4, 8, ..., 1048572}
+
 #if defined __builtin_bswap32 && defined __LITTLE_ENDIAN
 #undef htobe32
 #define htobe32(x) __builtin_bswap32(x)
+#elif defined __APPLE__
+#undef htobe32
+#define htobe32(x) OSSwapHostToBigInt32(x)
 #endif
 
 typedef uint16_t u16;
@@ -56,6 +68,14 @@ typedef u32 au32;
 #endif
 #endif
 
+#ifdef __AVX2__
+#define BLAKESINPARALLEL 4
+#elif defined __AVX__
+#define BLAKESINPARALLEL 2
+#else
+#define BLAKESINPARALLEL 1
+#endif 
+
 // number of buckets
 static const u32 NBUCKETS = 1<<BUCKBITS;
 // bucket mask
@@ -72,8 +92,10 @@ static const u32 XFULL = 16;
 static const u32 SLOTMASK = SLOTRANGE-1;
 // number of possible values of xhash (rest of n) bits
 static const u32 NRESTS = 1<<RESTBITS;
-// number of blocks of hashes extracted from single 512 bit blake2b output
-static const u32 NBLOCKS = (NHASHES+HASHESPERBLAKE-1)/HASHESPERBLAKE;
+// number of hashes extracted from BLAKESINPARALLEL blake2b outputs
+static const u32 HASHESPERBLOCK = BLAKESINPARALLEL*HASHESPERBLAKE;
+// number of blocks of parallel blake2b calls
+static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 // nothing larger found in 100000 runs
 static const u32 MAXSOLS = 8;
 
@@ -195,8 +217,10 @@ struct htalloc {
   }
 };
 
+typedef uchar midstate_t[256];
+
 struct equi {
-  blake2b_state blake_ctx;
+  midstate_t blake_ctx;
   htalloc hta;
   bsizes *nslots;
   proof *sols;
@@ -221,8 +245,15 @@ struct equi {
     free(nslots);
     free(sols);
   }
+#define ALIGN256(x)	((long)(x+31) & -32L)
   void setnonce(const char *header, const u32 headerlen, const u32 nonce) {
-    setheader(&blake_ctx, header, headerlen, nonce);
+    uchar __attribute__((aligned(8))) hdrnonce[256];
+    memcpy(hdrnonce, header, headerlen);
+    memcpy(hdrnonce+headerlen, &nonce, sizeof(u32));
+    uchar unaligned[sizeof(midstate_t)+31], *aligned = (uchar *)ALIGN256(unaligned);
+    void *midstate = (void *)aligned;
+    Blake2PrepareMidstate4(midstate, hdrnonce);
+    memcpy(&blake_ctx, midstate, sizeof(midstate_t));
     memset(nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
     nsols = xfull = bfull = hfull = 0;
   }
@@ -335,7 +366,7 @@ struct equi {
     }
     const slot1 *buck = hta.heap1[t.bucketid()];
     const u32 size = 1 << --r;
-    u32 tagi = r/2;
+    u32 tagi = hashwords(hashsize(r));
     return listindices1(r, buck[t.slotid0()][tagi].tag, indices,      dupes)
         || listindices1(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
         || (!dupes && orderindices(indices, size));
@@ -343,7 +374,7 @@ struct equi {
   bool listindices1(u32 r, const tree t, u32 *indices, u32 *dupes) {
     const slot0 *buck = hta.heap0[t.bucketid()];
     const u32 size = 1 << --r;
-    u32 tagi = r/2;
+    u32 tagi = hashwords(hashsize(r));
     return listindices0(r, buck[t.slotid0()][tagi].tag, indices,      dupes)
         || listindices0(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
         || (!dupes && orderindices(indices, size));
@@ -388,6 +419,7 @@ struct equi {
     }
     printf("\n");
 #endif
+    printf("Digit %d", r+1);
   }
 
   struct htlayout {
@@ -413,8 +445,6 @@ struct equi {
       return slot->bytes[prevbo] >> 4;
 #elif WN == 200 && RESTBITS == 8
       return (slot->bytes[prevbo] & 0xf) << 4 | slot->bytes[prevbo+1] >> 4;
-#elif WN == 200 && RESTBITS == 9
-      return (slot->bytes[prevbo] & 0x1f) << 4 | slot->bytes[prevbo+1] >> 4;
 #elif WN == 144 && RESTBITS == 4
       return slot->bytes[prevbo] & 0xf;
 #else
@@ -426,8 +456,6 @@ struct equi {
       return slot->bytes[prevbo] & 0xf;
 #elif WN == 200 && RESTBITS == 8
       return slot->bytes[prevbo];
-#elif WN == 200 && RESTBITS == 9
-      return (slot->bytes[prevbo]&1) << 8 | slot->bytes[prevbo+1];
 #elif WN == 144 && RESTBITS == 4
       return slot->bytes[prevbo] & 0xf;
 #else
@@ -502,39 +530,29 @@ struct equi {
   };
 
   void digit0(const u32 id) {
-    uchar hash[HASHOUT];
-    blake2b_state state0 = blake_ctx;
     htlayout htl(this, 0);
     const u32 hashbytes = hashsize(0);
+    uchar unaligned[2*sizeof(midstate_t)+256+31], *aligned = (uchar *)ALIGN256(unaligned);
+    void *midstate0 = (void *)aligned;
+    void *midstate  = (void *)(aligned+sizeof(midstate_t));
+    uchar *hashes   = (uchar *)(aligned+2*sizeof(midstate_t));
+    memcpy(midstate0, blake_ctx, sizeof(midstate_t));
     for (u32 block = id; block < NBLOCKS; block += nthreads) {
-      blake2b_state state = state0;
-      u32 leb = htole32(block);
-      blake2b_update(&state, (uchar *)&leb, sizeof(u32));
-      blake2b_final(&state, hash, HASHOUT);
-      for (u32 i = 0; i<HASHESPERBLAKE; i++) {
-        const uchar *ph = hash + i * WN/8;
-#if BUCKBITS == 12 && RESTBITS == 8
-        const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
-#elif BUCKBITS == 16 && RESTBITS == 4
-        const u32 bucketid = ((u32)ph[0] << 8) | ph[1];
-#elif BUCKBITS == 11 && RESTBITS == 9
-        const u32 bucketid = ((u32)ph[0] << 3) | ph[1] >> 5;
-#elif BUCKBITS == 20 && RESTBITS == 4
-        const u32 bucketid = ((((u32)ph[0] << 8) | ph[1]) << 4) | ph[2] >> 4;
-#elif BUCKBITS == 12 && RESTBITS == 4
-        const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
-        const u32 xhash = ph[1] & 0xf;
-#else
-#error not implemented
-#endif
-        const u32 slot = getslot0(bucketid);
-        if (slot >= NSLOTS) {
-          bfull++;
-          continue;
+      memcpy(midstate, midstate0, sizeof(midstate_t));
+      Blake2Run4(hashes, midstate, block * BLAKESINPARALLEL);
+      for (u32 i = 0; i<BLAKESINPARALLEL; i++) {
+        for (u32 j = 0; j<HASHESPERBLAKE; j++) {
+          const uchar *ph = hashes + i * 64 + j * WN/8;
+          const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
+          const u32 slot = getslot0(bucketid);
+          if (slot >= NSLOTS) {
+            bfull++;
+            continue;
+          }
+          htunit *s = hta.heap0[bucketid][slot] + htl.nexthtunits;
+          memcpy(s->bytes-hashbytes, ph+WN/8-hashbytes, hashbytes);
+          s->tag = tree((block * BLAKESINPARALLEL + i) * HASHESPERBLAKE + j);
         }
-        htunit *s = hta.heap0[bucketid][slot];
-        s->tag = tree(block * HASHESPERBLAKE + i);
-        memcpy(s[1 + htl.nexthtunits].bytes-hashbytes, ph+WN/8-hashbytes, hashbytes);
       }
     }
   }
@@ -547,14 +565,14 @@ struct equi {
       slot0 *buck = htl.hta.heap0[bucketid];
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *slot1 = buck[s1]+r/2+1;
+        const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, htl.getxhash0(slot1))) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          const htunit *slot0 = buck[s0]+r/2+1;
+          const htunit *slot0 = buck[s0];
           if (htl.equal(slot0, slot1)) {
             hfull++;
             continue;
@@ -564,9 +582,6 @@ struct equi {
 #if WN == 200 && BUCKBITS == 12 && RESTBITS == 8
           xorbucketid = (((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) & 0xf) << 8)
                              | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]);
-#elif WN == 200 && BUCKBITS == 11 && RESTBITS == 9
-          xorbucketid = (((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) & 0xf) << 7)
-                             | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 1;
 #elif WN == 144 && BUCKBITS == 20 && RESTBITS == 4
           xorbucketid = ((((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 8)
                               | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2])) << 4)
@@ -582,10 +597,10 @@ struct equi {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap1[xorbucketid][xorslot]+r/2;
-          xs++->tag = tree(bucketid, s0, s1);
+          htunit *xs = htl.hta.heap1[xorbucketid][xorslot];
           for (u32 i=htl.dunits; i < htl.prevhtunits; i++)
             xs++->word = slot0[i].word ^ slot1[i].word;
+          xs->tag = tree(bucketid, s0, s1);
         }
       }
     }
@@ -599,14 +614,14 @@ struct equi {
       slot1 *buck = htl.hta.heap1[bucketid];
       u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *slot1 = buck[s1]+(r-1)/2+1;
+        const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, htl.getxhash1(slot1))) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          const htunit *slot0 = buck[s0]+(r-1)/2+1;
+          const htunit *slot0 = buck[s0];
           if (htl.equal(slot0, slot1)) {
             hfull++;
             continue;
@@ -616,9 +631,6 @@ struct equi {
 #if WN == 200 && BUCKBITS == 12 && RESTBITS == 8
           xorbucketid = ((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 4)
                             | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
-#elif WN == 200 && BUCKBITS == 11 && RESTBITS == 9
-          xorbucketid = ((u32)(bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) << 3)
-                            | (bytes0[htl.prevbo+3] ^ bytes1[htl.prevbo+3]) >> 5;
 #elif WN == 144 && BUCKBITS == 20 && RESTBITS == 4
           xorbucketid = ((((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 8)
                               | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2])) << 4)
@@ -634,10 +646,10 @@ struct equi {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap0[xorbucketid][xorslot]+r/2;
-          xs++->tag = tree(bucketid, s0, s1);
+          htunit *xs = htl.hta.heap0[xorbucketid][xorslot];
           for (u32 i=htl.dunits; i < htl.prevhtunits; i++)
             xs++->word = slot0[i].word ^ slot1[i].word;
+          xs->tag = tree(bucketid, s0, s1);
         }
       }
     }
@@ -866,7 +878,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, (slot1->bytes[3] & 0xf) << 4 | slot1->bytes[3+1] >> 4)) {
+        if (!cd.addslot(s1, (slot1->bytes[3] & 0xf) << 4 | slot1->bytes[4] >> 4)) {
           xfull++;
           continue;
         }
@@ -936,19 +948,19 @@ struct equi {
       slot0 *buck = htl.hta.heap0[bucketid];
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *slot1 = buck[s1]+WK/2 + 1;
+        const htunit *slot1 = buck[s1];
         if (!cd.addslot(s1, htl.getxhash0(slot1))) // assume WK odd
           continue;
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          if (htl.equal(buck[s0]+WK/2+1, slot1)) { // EASY OPTIMIZE
+          if (htl.equal(buck[s0], slot1)) { // EASY OPTIMIZE
             candidate(tree(bucketid, s0, s1));
             nc++;
           }
         }
       }
     }
-    // printf(" %d candidates ", nc);
+    printf(" %d candidates ", nc);
   }
 };
 
@@ -970,57 +982,39 @@ void *worker(void *vp) {
   thread_ctx *tp = (thread_ctx *)vp;
   equi *eq = tp->eq;
 
-  if (tp->id == 0)
-    printf("Digit 0");
-  barrier(&eq->barry);
+  if (tp->id == 0) printf("Digit 0");
   eq->digit0(tp->id);
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(0);
   barrier(&eq->barry);
-#if WN == 200 && WK == 9 && RESTBITS == 8 && 0
-  if (tp->id == 0) printf("Digit 1");
-  barrier(&eq->barry);
+#if WN == 200 && WK == 9 && RESTBITS == 8
   eq->digit1(tp->id);
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(1);
-  barrier(&eq->barry);
-  if (tp->id == 0) printf("Digit 2");
   barrier(&eq->barry);
   eq->digit2(tp->id);
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(2);
   barrier(&eq->barry);
-  if (tp->id == 0) printf("Digit 3");
-  barrier(&eq->barry);
   eq->digit3(tp->id);
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(3);
-  barrier(&eq->barry);
-  if (tp->id == 0) printf("Digit 4");
   barrier(&eq->barry);
   eq->digit4(tp->id);
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(4);
   barrier(&eq->barry);
-  if (tp->id == 0) printf("Digit 5");
-  barrier(&eq->barry);
   eq->digit5(tp->id);
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(5);
-  barrier(&eq->barry);
-  if (tp->id == 0) printf("Digit 6");
   barrier(&eq->barry);
   eq->digit6(tp->id);
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(6);
   barrier(&eq->barry);
-  if (tp->id == 0) printf("Digit 7");
-  barrier(&eq->barry);
   eq->digit7(tp->id);
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(7);
-  barrier(&eq->barry);
-  if (tp->id == 0) printf("Digit 8");
   barrier(&eq->barry);
   eq->digit8(tp->id);
   barrier(&eq->barry);
@@ -1028,20 +1022,13 @@ void *worker(void *vp) {
   barrier(&eq->barry);
 #else
   for (u32 r = 1; r < WK; r++) {
-    if (tp->id == 0)
-      printf("Digit %d", r);
-    barrier(&eq->barry);
     r&1 ? eq->digitodd(r, tp->id) : eq->digiteven(r, tp->id);
     barrier(&eq->barry);
     if (tp->id == 0) eq->showbsizes(r);
     barrier(&eq->barry);
   }
 #endif
-  if (tp->id == 0)
-    printf("Digit %d\n", WK);
-  barrier(&eq->barry);
   eq->digitK(tp->id);
-  barrier(&eq->barry);
   pthread_exit(NULL);
   return 0;
 }

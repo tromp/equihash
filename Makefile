@@ -16,11 +16,11 @@ equi1g:	equi.h equi_miner.h equi_miner.cpp Makefile
 equi1445:	equi.h equi_miner.h equi_miner.cpp Makefile
 	$(GPP) -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp -o equi1445
 
-dev:	equi.h dev_miner.h dev_miner.cpp Makefile
-	$(GPP) -DATOMIC dev_miner.cpp blake/blake2b.cpp -o dev
+dev:	equi.h dev_miner.h dev_miner.cpp blake2b/zcblake2_avx2.o Makefile
+	$(GPP) -DATOMIC dev_miner.cpp blake/blake2b.cpp blake2b/zcblake2_avx2.o -o dev
 
-dev1:	equi.h dev_miner.h dev_miner.cpp Makefile
-	$(GPP) dev_miner.cpp blake/blake2b.cpp -o dev1
+dev1:	equi.h dev_miner.h dev_miner.cpp blake2b/zcblake2_avx2.o Makefile
+	$(GPP) dev_miner.cpp blake/blake2b.cpp blake2b/zcblake2_avx2.o -o dev1
 
 equidev:	equi.h equi_dev_miner.h equi_dev_miner.cpp Makefile
 	$(GPP) -DATOMIC equi_dev_miner.cpp blake/blake2b.cpp -o equidev
