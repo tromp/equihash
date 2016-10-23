@@ -26,6 +26,9 @@
 #if defined __builtin_bswap32 && defined __LITTLE_ENDIAN
 #undef htobe32
 #define htobe32(x) __builtin_bswap32(x)
+#elif defined __APPLE__
+#undef htobe32
+#define htobe32(x) OSSwapHostToBigInt32(x)
 #endif
 
 typedef uint16_t u16;
