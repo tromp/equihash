@@ -28,31 +28,26 @@ unsigned char __attribute__((aligned(8))) testdata[140] =
 int main(void)
 {
 	unsigned char midstate_a[256+32];
-	void *pmidstate = midstate_a; // (void *) (((long) midstate_a+31L) & -32L);
+	void *pmidstate = (void *) (((long) midstate_a+31L) & -32L);
 	unsigned char hashout_a[256+32];
 	unsigned char *phashout = (unsigned char *) (((long) hashout_a+31L) & -32L);
 	unsigned char buf[256];
 	FILE *outfile;
-	int i,x;
+	int i;
 
 	Blake2PrepareMidstate4(pmidstate, testdata);
 	outfile = fopen("out.bin", "wb");
 
-	for (i=0; i<10*1048576; i+=4) {
+	for (i=0; i<1048576; i+=4) {
 		Blake2Run4(phashout, pmidstate, i);
-#if 0
 		memcpy(buf, phashout, 50);
 		memcpy(buf+50, phashout+64, 50);
 		memcpy(buf+100, phashout+128, 50);
 		memcpy(buf+150, phashout+192, 50);
 		fwrite(buf, 200, 1, outfile);	
-#else
-                x += phashout[0];
-#endif
 	}
 
 	fclose(outfile);
-        printf("x = %d\n", x);
 
 	return 0;
 }

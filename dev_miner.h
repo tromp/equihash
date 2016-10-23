@@ -259,9 +259,13 @@ struct equi {
   }
 #define ALIGN256(x)	((long)(x+31) & -32L)
   void setnonce(const char *header, const u32 headerlen, const u32 nonce) {
-    uchar __attribute__((aligned(8))) hdrnonce[256];
+    uchar __attribute__((aligned(8))) hdrnonce[140];
     memcpy(hdrnonce, header, headerlen);
-    memcpy(hdrnonce+headerlen, &nonce, sizeof(u32));
+    assert(headerlen <= 108);
+    memset(hdrnonce+headerlen, 0, 140-32-headerlen);
+    uint32_t le_nonce = htole32(nonce);
+    memcpy(hdrnonce+140-32, &le_nonce, sizeof(u32));
+    memset(hdrnonce+140-28, 0, 28);
     uchar unaligned[sizeof(midstate_t)+31], *aligned = (uchar *)ALIGN256(unaligned);
     void *midstate = (void *)aligned;
     Blake2PrepareMidstate4(midstate, hdrnonce);

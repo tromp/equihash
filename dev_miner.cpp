@@ -65,13 +65,12 @@ int main(int argc, char **argv) {
     for (unsigned s = 0; s < eq.nsols; s++) {
       nsols++;
       if (showsol) {
-        printf("Solution");
+        printf("\nSolution");
         for (u32 i = 0; i < PROOFSIZE; i++)
           printf(" %jx", (uintmax_t)eq.sols[s][i]);
-        printf("\n");
       }
     }
-    printf("%d solutions\n", nsols);
+    printf("\n%d solutions\n", nsols);
     sumnsols += nsols;
   }
   free(threads);
