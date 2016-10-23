@@ -18,7 +18,7 @@
 // the i*n 0s, each bucket having 4 * 2^RESTBITS slots,
 // twice the number of subtrees expected to land there.
 
-#include "dev.h"
+#include "equi.h"
 #include <stdio.h>
 #include <pthread.h>
 #include <assert.h>
@@ -72,7 +72,7 @@ static const u32 XFULL = 16;
 static const u32 SLOTMASK = SLOTRANGE-1;
 // number of possible values of xhash (rest of n) bits
 static const u32 NRESTS = 1<<RESTBITS;
-// number of blocks of hashes extracted from single blake2bp call
+// number of blocks of hashes extracted from single 512 bit blake2b output
 static const u32 NBLOCKS = (NHASHES+HASHESPERBLAKE-1)/HASHESPERBLAKE;
 // nothing larger found in 100000 runs
 static const u32 MAXSOLS = 8;
@@ -196,7 +196,7 @@ struct htalloc {
 };
 
 struct equi {
-  blake2bp_state blake_ctx;
+  blake2b_state blake_ctx;
   htalloc hta;
   bsizes *nslots;
   proof *sols;
@@ -252,6 +252,7 @@ struct equi {
     nslot = 0;
     return n;
   }
+#ifdef MERGESORT
   // if merged != 0, mergesort indices and return true if dupe found
   // if merged == 0, order indices as in Wagner condition
   bool orderindices(u32 *indices, u32 size, u32 *merged) {
@@ -285,7 +286,7 @@ struct equi {
     const u32 size = 1 << --r;
     u32 *indices1 = indices + size;
     u32 tagi = hashwords(hashsize(r));
-    return listindices1(r, buck[t.slotid0()][tagi].tag, indices, merged)
+    return listindices1(r, buck[t.slotid0()][tagi].tag, indices,  merged)
         || listindices1(r, buck[t.slotid1()][tagi].tag, indices1, merged)
         || orderindices(indices, size, merged);
   }
@@ -294,7 +295,7 @@ struct equi {
     const u32 size = 1 << --r;
     u32 *indices1 = indices + size;
     u32 tagi = hashwords(hashsize(r));
-    return listindices0(r, buck[t.slotid0()][tagi].tag, indices, merged)
+    return listindices0(r, buck[t.slotid0()][tagi].tag, indices,  merged)
         || listindices0(r, buck[t.slotid1()][tagi].tag, indices1, merged)
         || orderindices(indices, size, merged);
   }
@@ -308,6 +309,59 @@ struct equi {
 #endif
     if (soli < MAXSOLS) listindices1(WK, t, sols[soli], 0);
   }
+#else
+  bool orderindices(u32 *indices, u32 size) {
+    if (indices[0] > indices[size]) {
+      for (u32 i=0; i < size; i++) {
+        const u32 tmp = indices[i];
+        indices[i] = indices[size+i];
+        indices[size+i] = tmp;
+      }
+    }
+    return false;
+  }
+  // if dupes != 0, list indices in arbitrary order and return true if dupe found
+  // if dupes == 0, order indices as in Wagner condition
+  bool listindices0(u32 r, const tree t, u32 *indices, u32 *dupes) {
+    if (r == 0) {
+      u32 idx = t.getindex();
+      if (dupes) {
+        u32 bin = idx & (PROOFSIZE-1);
+        if (idx == dupes[bin]) return true;
+        dupes[bin] = idx;
+      }
+      *indices = idx;
+      return false;
+    }
+    const slot1 *buck = hta.heap1[t.bucketid()];
+    const u32 size = 1 << --r;
+    u32 tagi = r/2;
+    return listindices1(r, buck[t.slotid0()][tagi].tag, indices,      dupes)
+        || listindices1(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
+        || (!dupes && orderindices(indices, size));
+  }
+  bool listindices1(u32 r, const tree t, u32 *indices, u32 *dupes) {
+    const slot0 *buck = hta.heap0[t.bucketid()];
+    const u32 size = 1 << --r;
+    u32 tagi = r/2;
+    return listindices0(r, buck[t.slotid0()][tagi].tag, indices,      dupes)
+        || listindices0(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
+        || (!dupes && orderindices(indices, size));
+  }
+  void candidate(const tree t) {
+    proof prf, dupes;
+    memset(dupes, 0xffff, sizeof(proof));
+    if (listindices1(WK, t, prf, dupes)) return; // assume WK odd
+    qsort(prf, PROOFSIZE, sizeof(u32), &compu32);
+    for (u32 i=1; i<PROOFSIZE; i++) if (prf[i] <= prf[i-1]) return;
+#ifdef ATOMIC
+    u32 soli = std::atomic_fetch_add_explicit(&nsols, 1U, std::memory_order_relaxed);
+#else
+    u32 soli = nsols++;
+#endif
+    if (soli < MAXSOLS) listindices1(WK, t, sols[soli], 0); // assume WK odd
+  }
+#endif
   void showbsizes(u32 r) {
     printf(" x%d b%d h%d\n", xfull, bfull, hfull);
     xfull = bfull = hfull = 0;
@@ -449,21 +503,20 @@ struct equi {
 
   void digit0(const u32 id) {
     uchar hash[HASHOUT];
-    blake2bp_state state;
+    blake2b_state state0 = blake_ctx;
     htlayout htl(this, 0);
     const u32 hashbytes = hashsize(0);
     for (u32 block = id; block < NBLOCKS; block += nthreads) {
-      state = blake_ctx;
+      blake2b_state state = state0;
       u32 leb = htole32(block);
-      // blake2bp_update(&state, (uchar *)&leb, sizeof(u32));
-      // blake2bp_final(&state, hash, HASHOUT);
-      blake2bp(hash, (uchar *)&leb, sizeof(u32));
+      blake2b_update(&state, (uchar *)&leb, sizeof(u32));
+      blake2b_final(&state, hash, HASHOUT);
       for (u32 i = 0; i<HASHESPERBLAKE; i++) {
         const uchar *ph = hash + i * WN/8;
-#if BUCKBITS == 16 && RESTBITS == 4
-        const u32 bucketid = ((u32)ph[0] << 8) | ph[1];
-#elif BUCKBITS == 12 && RESTBITS == 8
+#if BUCKBITS == 12 && RESTBITS == 8
         const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
+#elif BUCKBITS == 16 && RESTBITS == 4
+        const u32 bucketid = ((u32)ph[0] << 8) | ph[1];
 #elif BUCKBITS == 11 && RESTBITS == 9
         const u32 bucketid = ((u32)ph[0] << 3) | ph[1] >> 5;
 #elif BUCKBITS == 20 && RESTBITS == 4
@@ -479,9 +532,9 @@ struct equi {
           bfull++;
           continue;
         }
-        htunit *s = hta.heap0[bucketid][slot] + htl.nexthtunits;
-        memcpy(s->bytes-hashbytes, ph+WN/8-hashbytes, hashbytes);
+        htunit *s = hta.heap0[bucketid][slot];
         s->tag = tree(block * HASHESPERBLAKE + i);
+        memcpy(s[1 + htl.nexthtunits].bytes-hashbytes, ph+WN/8-hashbytes, hashbytes);
       }
     }
   }
@@ -494,14 +547,14 @@ struct equi {
       slot0 *buck = htl.hta.heap0[bucketid];
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *slot1 = buck[s1];
+        const htunit *slot1 = buck[s1]+r/2+1;
         if (!cd.addslot(s1, htl.getxhash0(slot1))) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          const htunit *slot0 = buck[s0];
+          const htunit *slot0 = buck[s0]+r/2+1;
           if (htl.equal(slot0, slot1)) {
             hfull++;
             continue;
@@ -529,10 +582,10 @@ struct equi {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap1[xorbucketid][xorslot];
+          htunit *xs = htl.hta.heap1[xorbucketid][xorslot]+r/2;
+          xs++->tag = tree(bucketid, s0, s1);
           for (u32 i=htl.dunits; i < htl.prevhtunits; i++)
             xs++->word = slot0[i].word ^ slot1[i].word;
-          xs->tag = tree(bucketid, s0, s1);
         }
       }
     }
@@ -546,14 +599,14 @@ struct equi {
       slot1 *buck = htl.hta.heap1[bucketid];
       u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *slot1 = buck[s1];
+        const htunit *slot1 = buck[s1]+(r-1)/2+1;
         if (!cd.addslot(s1, htl.getxhash1(slot1))) {
           xfull++;
           continue;
         }
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          const htunit *slot0 = buck[s0];
+          const htunit *slot0 = buck[s0]+(r-1)/2+1;
           if (htl.equal(slot0, slot1)) {
             hfull++;
             continue;
@@ -581,10 +634,10 @@ struct equi {
             bfull++;
             continue;
           }
-          htunit *xs = htl.hta.heap0[xorbucketid][xorslot];
+          htunit *xs = htl.hta.heap0[xorbucketid][xorslot]+r/2;
+          xs++->tag = tree(bucketid, s0, s1);
           for (u32 i=htl.dunits; i < htl.prevhtunits; i++)
             xs++->word = slot0[i].word ^ slot1[i].word;
-          xs->tag = tree(bucketid, s0, s1);
         }
       }
     }
@@ -883,12 +936,12 @@ struct equi {
       slot0 *buck = htl.hta.heap0[bucketid];
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
-        const htunit *slot1 = buck[s1];
+        const htunit *slot1 = buck[s1]+WK/2 + 1;
         if (!cd.addslot(s1, htl.getxhash0(slot1))) // assume WK odd
           continue;
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          if (htl.equal(buck[s0], slot1)) { // EASY OPTIMIZE
+          if (htl.equal(buck[s0]+WK/2+1, slot1)) { // EASY OPTIMIZE
             candidate(tree(bucketid, s0, s1));
             nc++;
           }
@@ -924,7 +977,7 @@ void *worker(void *vp) {
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(0);
   barrier(&eq->barry);
-#if WN == 200 && WK == 9 && RESTBITS == 8
+#if WN == 200 && WK == 9 && RESTBITS == 8 && 0
   if (tp->id == 0) printf("Digit 1");
   barrier(&eq->barry);
   eq->digit1(tp->id);
