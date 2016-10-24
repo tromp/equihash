@@ -138,8 +138,8 @@ struct equi {
   equi(const u32 n_threads) {
     nthreads = n_threads;
   }
-  void setnonce(const char *header, const u32 headerlen, const u32 nonce) {
-    setheader(&blake_ctx, header, headerlen, nonce);
+  void setheadernonce(const char *headernonce, const u32 len) {
+    setheader(&blake_ctx, headernonce);
     checkCudaErrors(cudaMemset(nslots, 0, NBUCKETS * sizeof(u32)));
     nsols = 0;
   }
@@ -937,6 +937,11 @@ int main(int argc, char **argv) {
   printf(") with %d %d-bits digits and %d threads (%d per block)\n", NDIGITS, DIGITBITS, nthreads, tpb);
   equi eq(nthreads);
 
+  char headernonce[HEADERNONCELEN];
+  u32 hdrlen = strlen(header);
+  memcpy(headernonce, header, hdrlen);
+  memset(headernonce+hdrlen, 0, sizeof(headernonce)-hdrlen);
+
   u32 *heap0, *heap1;
   checkCudaErrors(cudaMalloc((void**)&heap0, sizeof(digit0)));
   checkCudaErrors(cudaMalloc((void**)&heap1, sizeof(digit1)));
@@ -960,7 +965,7 @@ int main(int argc, char **argv) {
   u32 sumnsols = 0;
   for (int r = 0; r < range; r++) {
     cudaEventRecord(start, NULL);
-    eq.setnonce(header, strlen(header), nonce+r);
+    eq.setheadernonce(headernonce, sizeof(headernonce));
     checkCudaErrors(cudaMemcpy(device_eq, &eq, sizeof(equi), cudaMemcpyHostToDevice));
     printf("Digit 0\n");
     digitH<<<nthreads/tpb,tpb >>>(device_eq);
