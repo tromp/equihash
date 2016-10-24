@@ -1,6 +1,9 @@
 // Equihash solver
 // Copyright (c) 2016 John Tromp
 
+// This development version uses xenoncat's highly optimized
+// 4-way parallel blake2b implementation
+
 // Fix N, K, such that n = N/(k+1) is integer
 // Fix M = 2^{n+1} hashes each of length N bits,
 // H_0, ... , H_{M-1}, generated fom (n+1)-bit indices.
