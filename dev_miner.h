@@ -229,10 +229,8 @@ struct htalloc {
   }
 };
 
-typedef uchar midstate_t[256];
-
 struct equi {
-  midstate_t blake_ctx;
+  alignas(32) uchar blake_ctx[256];
   htalloc hta;
   bsizes *nslots;
   proof *sols;
@@ -257,19 +255,13 @@ struct equi {
     free(nslots);
     free(sols);
   }
-#define ALIGN256(x)	((long)(x+31) & -32L)
-  void setnonce(const char *header, const u32 headerlen, const u32 nonce) {
-    uchar __attribute__((aligned(8))) hdrnonce[140];
-    memcpy(hdrnonce, header, headerlen);
-    assert(headerlen <= 108);
-    memset(hdrnonce+headerlen, 0, 140-32-headerlen);
-    uint32_t le_nonce = htole32(nonce);
-    memcpy(hdrnonce+140-32, &le_nonce, sizeof(u32));
-    memset(hdrnonce+140-28, 0, 28);
-    uchar unaligned[sizeof(midstate_t)+31], *aligned = (uchar *)ALIGN256(unaligned);
-    void *midstate = (void *)aligned;
-    Blake2PrepareMidstate4(midstate, hdrnonce);
-    memcpy(&blake_ctx, midstate, sizeof(midstate_t));
+  void setheadernonce(const char *headernonce, const u32 len) {
+    alignas(8) uchar alignheader[HEADERNONCELEN];
+    memcpy(alignheader, headernonce, len);
+    assert(len == HEADERNONCELEN);
+    alignas(32) uchar midstate[256];
+    Blake2PrepareMidstate4(midstate, alignheader);
+    memcpy(&blake_ctx, midstate, 256);
     memset(nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
     nsols = xfull = bfull = hfull = 0;
   }
@@ -547,18 +539,18 @@ struct equi {
 
   void digit0(const u32 id) {
     htlayout htl(this, 0);
+#ifndef HASHONLY
     const u32 hashbytes = hashsize(0);
-    uchar unaligned[2*sizeof(midstate_t)+256+31], *aligned = (uchar *)ALIGN256(unaligned);
-    void *midstate0 = (void *)aligned;
-    void *midstate  = (void *)(aligned+sizeof(midstate_t));
-    uchar *hashes   = (uchar *)(aligned+2*sizeof(midstate_t));
-    memcpy(midstate0, blake_ctx, sizeof(midstate_t));
+#endif
+    alignas(32) uchar midstate[256], hashes[256];
+    //aligned256 midstate, hashes;
+    memcpy((void *)midstate, blake_ctx, 256);
     for (u32 block = id; block < NBLOCKS; block += nthreads) {
-      memcpy(midstate, midstate0, sizeof(midstate_t));
-      Blake2Run4(hashes, midstate, block * BLAKESINPARALLEL);
+      Blake2Run4(hashes, (void *)midstate, block * BLAKESINPARALLEL);
+#ifndef HASHONLY
       for (u32 i = 0; i<BLAKESINPARALLEL; i++) {
         for (u32 j = 0; j<HASHESPERBLAKE; j++) {
-          const uchar *ph = hashes + i * 64 + j * WN/8;
+          const uchar *ph = hashes+ i * 64 + j * WN/8;
           const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
           const u32 slot = getslot0(bucketid);
           if (slot >= NSLOTS) {
@@ -570,6 +562,7 @@ struct equi {
           s->tag = tree((block * BLAKESINPARALLEL + i) * HASHESPERBLAKE + j);
         }
       }
+#endif
     }
   }
   
@@ -1000,6 +993,9 @@ void *worker(void *vp) {
 
   if (tp->id == 0) printf("Digit 0");
   eq->digit0(tp->id);
+#ifdef HASHONLY
+  pthread_exit(NULL);
+#endif
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(0);
   barrier(&eq->barry);

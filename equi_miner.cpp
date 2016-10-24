@@ -49,8 +49,13 @@ int main(int argc, char **argv) {
   equi eq(nthreads);
   printf("Using %dMB of memory\n", 1 + eq.hta.alloced / 0x100000);
   u32 sumnsols = 0;
+  char headernonce[HEADERNONCELEN];
+  u32 hdrlen = strlen(header);
+  memcpy(headernonce, header, hdrlen);
+  memset(headernonce+hdrlen, 0, sizeof(headernonce)-hdrlen);
   for (int r = 0; r < range; r++) {
-    eq.setnonce(header, strlen(header), nonce+r);
+    ((u32 *)headernonce)[32] = htole32(nonce+r);
+    eq.setheadernonce(headernonce, sizeof(headernonce));
     for (int t = 0; t < nthreads; t++) {
       threads[t].id = t;
       threads[t].eq = &eq;

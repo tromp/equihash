@@ -2,14 +2,28 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 void Blake2PrepareMidstate4(void *midstate, unsigned char *input);
 //midstate: 256 bytes of buffer for output midstate, aligned by 32
 //input: 140 bytes header, preferably aligned by 8
+#ifdef __cplusplus
+}
+#endif
+//midstate: 256 bytes of buffer for output midstate, aligned by 32
+//input: 140 bytes header, preferably aligned by 8
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 void Blake2Run4(unsigned char *hashout, void *midstate, uint32_t indexctr);
 //hashout: hash output buffer: 4*64 bytes
 //midstate: 256 bytes from Blake2PrepareMidstate4
 //indexctr: For n=200, k=9: {0, 4, 8, ..., 1048572}
+#ifdef __cplusplus
+}
+#endif
 
 unsigned char __attribute__((aligned(8))) testdata[140] =
 {
@@ -25,6 +39,9 @@ unsigned char __attribute__((aligned(8))) testdata[140] =
 };
 //expected output: 281dd5fc6d878538e640987b9bc597dbbd4af2cdf8bf5fb03bdfcefa40d8747d  out.bin
 
+#ifndef NTRIALS
+#define NTRIALS 1
+#endif
 int main(void)
 {
 	unsigned char midstate_a[256+32];
@@ -36,18 +53,24 @@ int main(void)
 	int i;
 
 	Blake2PrepareMidstate4(pmidstate, testdata);
+#ifdef IO
 	outfile = fopen("out.bin", "wb");
+#endif
 
-	for (i=0; i<1048576; i+=4) {
+	for (i=0; i<NTRIALS*1048576; i+=4) {
 		Blake2Run4(phashout, pmidstate, i);
 		memcpy(buf, phashout, 50);
 		memcpy(buf+50, phashout+64, 50);
 		memcpy(buf+100, phashout+128, 50);
 		memcpy(buf+150, phashout+192, 50);
+#ifdef IO
 		fwrite(buf, 200, 1, outfile);	
+#endif
 	}
 
+#ifdef IO
 	fclose(outfile);
+#endif
 
 	return 0;
 }

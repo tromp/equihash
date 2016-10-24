@@ -21,13 +21,18 @@ int main(int argc, char **argv) {
   }
   printf("Verifying size %d proof for equi(\"%s\",%d)\n",
                PROOFSIZE, header, nonce);
+  char headernonce[HEADERNONCELEN];
+  u32 hdrlen = strlen(header);
+  memcpy(headernonce, header, hdrlen);
+  memset(headernonce+hdrlen, 0, sizeof(headernonce)-hdrlen);
+  ((u32 *)headernonce)[32] = htole32(nonce);
   for (int nsols=0; scanf(" Solution") == 0; nsols++) {
     u32 indices[PROOFSIZE];
     for (int n = 0; n < PROOFSIZE; n++) {
       int nscan = scanf(" %x", &indices[n]);
       assert(nscan == 1);
     }
-    int pow_rc = verify(indices, header, strlen(header), nonce);
+    int pow_rc = verify(indices, headernonce, sizeof(headernonce));
     if (pow_rc == POW_OK)
       printf("Verified\n");
     else

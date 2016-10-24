@@ -224,8 +224,8 @@ struct equi {
     free(nslots);
     free(sols);
   }
-  void setnonce(const char *header, const u32 headerlen, const u32 nonce) {
-    setheader(&blake_ctx, header, headerlen, nonce);
+  void setheadernonce(const char *headernonce, const u32 len) {
+    setheader(&blake_ctx, headernonce);
     memset(nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
     nsols = xfull = bfull = hfull = 0;
   }
