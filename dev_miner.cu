@@ -23,46 +23,89 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 #endif
 
 // 2_log of number of buckets
-#define BUCKBITS	(DIGITBITS-RESTBITS)
+#define BUCKBITS (DIGITBITS-RESTBITS)
+
+#ifndef SAVEMEM
+#if RESTBITS == 4
+// can't save memory in such small buckets
+#define SAVEMEM 1
+#elif RESTBITS >= 8
+// take advantage of law of large numbers (sum of 2^8 random numbers)
+// this reduces (200,9) memory to under 144MB, with negligible discarding
+#define SAVEMEM 9/14
+#endif
+#endif
+
 // number of buckets
 static const u32 NBUCKETS = 1<<BUCKBITS;
+// bucket mask
+static const u32 BUCKMASK = NBUCKETS-1;
 // 2_log of number of slots per bucket
 static const u32 SLOTBITS = RESTBITS+1+1;
+static const u32 SLOTRANGE = 1<<SLOTBITS;
 // number of slots per bucket
-static const u32 NSLOTS = 1<<SLOTBITS;
+static const u32 NSLOTS = SLOTRANGE * SAVEMEM;
 // number of per-xhash slots
 static const u32 XFULL = 16;
 // SLOTBITS mask
-static const u32 SLOTMASK = NSLOTS-1;
+static const u32 SLOTMASK = SLOTRANGE-1;
 // number of possible values of xhash (rest of n) bits
 static const u32 NRESTS = 1<<RESTBITS;
+// RESTBITS mask
+static const u32 RESTMASK = NRESTS-1;
 // number of blocks of hashes extracted from single 512 bit blake2b output
 static const u32 NBLOCKS = (NHASHES+HASHESPERBLAKE-1)/HASHESPERBLAKE;
 // nothing larger found in 100000 runs
 static const u32 MAXSOLS = 8;
 
-// scaling factor for showing bucketsize histogra as sparkline
-#ifndef SPARKSCALE
-#define SPARKSCALE	(40 << (BUCKBITS-12))
-#endif
-
 // tree node identifying its children as two different slots in
 // a bucket on previous layer with the same rest bits (x-tra hash)
 struct tree {
-  unsigned bucketid : BUCKBITS;
-  unsigned slotid0  : SLOTBITS;
-  unsigned slotid1  : SLOTBITS;
-#ifdef XINTREE
-  unsigned xhash    : RESTBITS;
-#endif
+  u32 bid_s0_s1_x; // manual bitfields
 
-// layer 0 has no children bit needs to encode index
-  __device__ u32 getindex() const {
-    return (bucketid << SLOTBITS) | slotid0;
+  __device__ tree(const u32 idx, const u32 xh) {
+    bid_s0_s1_x = idx << RESTBITS | xh;
   }
-  __device__ void setindex(const u32 idx) {
-    slotid0 = idx & SLOTMASK;
-    bucketid = idx >> SLOTBITS;
+  __device__ tree(const u32 idx) {
+    bid_s0_s1_x = idx;
+  }
+  __device__ tree(const u32 bid, const u32 s0, const u32 s1, const u32 xh) {
+#ifdef XINTREE
+  bid_s0_s1_x = ((((bid << SLOTBITS) | s0) << SLOTBITS) | s1) << RESTBITS | xh;
+#else
+  bid_s0_s1_x = (((bid << SLOTBITS) | s0) << SLOTBITS) | s1;
+#endif
+  }
+  __device__ u32 getindex() const {
+#ifdef XINTREE
+    return bid_s0_s1_x >> RESTBITS;
+#else
+    return bid_s0_s1_x;
+#endif
+  }
+  __device__ u32 bucketid() const {
+#ifdef XINTREE
+    return bid_s0_s1_x >> (2 * SLOTBITS + RESTBITS);
+#else
+    return bid_s0_s1_x >> (2 * SLOTBITS);
+#endif
+  }
+  __device__ u32 slotid0() const {
+#ifdef XINTREE
+    return (bid_s0_s1_x >> SLOTBITS+RESTBITS) & SLOTMASK;
+#else
+    return (bid_s0_s1_x >> SLOTBITS) & SLOTMASK;
+#endif
+  }
+  __device__ u32 slotid1() const {
+#ifdef XINTREE
+    return (bid_s0_s1_x >> RESTBITS) & SLOTMASK;
+#else
+    return bid_s0_s1_x & SLOTMASK;
+#endif
+  }
+  __device__ u32 xhash() const {
+    return bid_s0_s1_x & RESTMASK;
   }
 };
 
@@ -138,13 +181,19 @@ struct equi {
   equi(const u32 n_threads) {
     nthreads = n_threads;
   }
-  void setnonce(const char *header, const u32 headerlen, const u32 nonce) {
-    setheader(&blake_ctx, header, headerlen, nonce);
+  void setheadernonce(const char *headernonce, const u32 len) {
+    setheader(&blake_ctx, headernonce);
     checkCudaErrors(cudaMemset(nslots, 0, NBUCKETS * sizeof(u32)));
     nsols = 0;
   }
-  __device__ u32 getnslots(const u32 r, const u32 bid) {
-    u32 &nslot = nslots[r&1][bid];
+  __device__ u32 getnslots0(const u32 bid) {
+    u32 &nslot = nslots[0][bid];
+    const u32 n = min(nslot, NSLOTS);
+    nslot = 0;
+    return n;
+  }
+  __device__ u32 getnslots1(const u32 bid) {
+    u32 &nslot = nslots[1][bid];
     const u32 n = min(nslot, NSLOTS);
     nslot = 0;
     return n;
@@ -159,66 +208,66 @@ struct equi {
     }
   }
   __device__ void listindices1(const tree t, u32 *indices) {
-    const bucket0 &buck = hta.trees0[0][t.bucketid];
+    const bucket0 &buck = hta.trees0[0][t.bucketid()];
     const u32 size = 1 << 0;
-    indices[0]    = buck[t.slotid0].attr.getindex();
-    indices[size] = buck[t.slotid1].attr.getindex();
+    indices[0]    = buck[t.slotid0()].attr.getindex();
+    indices[size] = buck[t.slotid1()].attr.getindex();
     orderindices(indices, size);
   }
   __device__ void listindices2(const tree t, u32 *indices) {
-    const bucket1 &buck = hta.trees1[0][t.bucketid];
+    const bucket1 &buck = hta.trees1[0][t.bucketid()];
     const u32 size = 1 << 1;
-    listindices1(buck[t.slotid0].attr, indices);
-    listindices1(buck[t.slotid1].attr, indices+size);
+    listindices1(buck[t.slotid0()].attr, indices);
+    listindices1(buck[t.slotid1()].attr, indices+size);
     orderindices(indices, size);
   }
   __device__ void listindices3(const tree t, u32 *indices) {
-    const bucket0 &buck = hta.trees0[1][t.bucketid];
+    const bucket0 &buck = hta.trees0[1][t.bucketid()];
     const u32 size = 1 << 2;
-    listindices2(buck[t.slotid0].attr, indices);
-    listindices2(buck[t.slotid1].attr, indices+size);
+    listindices2(buck[t.slotid0()].attr, indices);
+    listindices2(buck[t.slotid1()].attr, indices+size);
     orderindices(indices, size);
   }
   __device__ void listindices4(const tree t, u32 *indices) {
-    const bucket1 &buck = hta.trees1[1][t.bucketid];
+    const bucket1 &buck = hta.trees1[1][t.bucketid()];
     const u32 size = 1 << 3;
-    listindices3(buck[t.slotid0].attr, indices);
-    listindices3(buck[t.slotid1].attr, indices+size);
+    listindices3(buck[t.slotid0()].attr, indices);
+    listindices3(buck[t.slotid1()].attr, indices+size);
     orderindices(indices, size);
   }
   __device__ void listindices5(const tree t, u32 *indices) {
-    const bucket0 &buck = hta.trees0[2][t.bucketid];
+    const bucket0 &buck = hta.trees0[2][t.bucketid()];
     const u32 size = 1 << 4;
-    listindices4(buck[t.slotid0].attr, indices);
-    listindices4(buck[t.slotid1].attr, indices+size);
+    listindices4(buck[t.slotid0()].attr, indices);
+    listindices4(buck[t.slotid1()].attr, indices+size);
     orderindices(indices, size);
   }
   __device__ void listindices6(const tree t, u32 *indices) {
-    const bucket1 &buck = hta.trees1[2][t.bucketid];
+    const bucket1 &buck = hta.trees1[2][t.bucketid()];
     const u32 size = 1 << 5;
-    listindices5(buck[t.slotid0].attr, indices);
-    listindices5(buck[t.slotid1].attr, indices+size);
+    listindices5(buck[t.slotid0()].attr, indices);
+    listindices5(buck[t.slotid1()].attr, indices+size);
     orderindices(indices, size);
   }
   __device__ void listindices7(const tree t, u32 *indices) {
-    const bucket0 &buck = hta.trees0[3][t.bucketid];
+    const bucket0 &buck = hta.trees0[3][t.bucketid()];
     const u32 size = 1 << 6;
-    listindices6(buck[t.slotid0].attr, indices);
-    listindices6(buck[t.slotid1].attr, indices+size);
+    listindices6(buck[t.slotid0()].attr, indices);
+    listindices6(buck[t.slotid1()].attr, indices+size);
     orderindices(indices, size);
   }
   __device__ void listindices8(const tree t, u32 *indices) {
-    const bucket1 &buck = hta.trees1[3][t.bucketid];
+    const bucket1 &buck = hta.trees1[3][t.bucketid()];
     const u32 size = 1 << 7;
-    listindices7(buck[t.slotid0].attr, indices);
-    listindices7(buck[t.slotid1].attr, indices+size);
+    listindices7(buck[t.slotid0()].attr, indices);
+    listindices7(buck[t.slotid1()].attr, indices+size);
     orderindices(indices, size);
   }
   __device__ void listindices9(const tree t, u32 *indices) {
-    const bucket0 &buck = hta.trees0[4][t.bucketid];
+    const bucket0 &buck = hta.trees0[4][t.bucketid()];
     const u32 size = 1 << 8;
-    listindices8(buck[t.slotid0].attr, indices);
-    listindices8(buck[t.slotid1].attr, indices+size);
+    listindices8(buck[t.slotid0()].attr, indices);
+    listindices8(buck[t.slotid1()].attr, indices+size);
     orderindices(indices, size);
   }
   __device__ void candidate(const tree t) {
@@ -289,7 +338,7 @@ struct equi {
     u32 dunits;
     u32 prevbo;
     u32 nextbo;
-  
+
     __device__ htlayout(equi *eq, u32 r): hta(eq->hta), prevhashunits(0), dunits(0) {
       u32 nexthashbytes = hashsize(r);
       nexthashunits = hashwords(nexthashbytes);
@@ -304,7 +353,7 @@ struct equi {
     }
     __device__ u32 getxhash0(const slot0* pslot) const {
 #ifdef XINTREE
-      return pslot->attr.xhash;
+      return pslot->attr.xhash();
 #elif WN == 200 && RESTBITS == 4
       return pslot->hash->bytes[prevbo] >> 4;
 #elif WN == 200 && RESTBITS == 8
@@ -319,7 +368,7 @@ struct equi {
     }
     __device__ u32 getxhash1(const slot1* pslot) const {
 #ifdef XINTREE
-      return pslot->attr.xhash;
+      return pslot->attr.xhash();
 #elif WN == 200 && RESTBITS == 4
       return pslot->hash->bytes[prevbo] & 0xf;
 #elif WN == 200 && RESTBITS == 8
@@ -434,13 +483,12 @@ __global__ void digitH(equi *eq) {
       const u32 slot = atomicAdd(&eq->nslots[0][bucketid], 1);
       if (slot >= NSLOTS)
         continue;
-      tree leaf;
-      leaf.setindex(block*HASHESPERBLAKE+i);
-#ifdef XINTREE
-      leaf.xhash = xhash;
-#endif
       slot0 &s = eq->hta.trees0[0][bucketid][slot];
-      s.attr = leaf;
+#ifdef XINTREE
+      s.attr = tree(block*HASHESPERBLAKE+i, xhash);
+#else
+      s.attr = tree(block*HASHESPERBLAKE+i);
+#endif
       memcpy(s.hash->bytes+htl.nextbo, ph+WN/8-hashbytes, hashbytes);
     }
   }
@@ -452,10 +500,10 @@ __global__ void digitO(equi *eq, const u32 r) {
   const u32 id = blockIdx.x * blockDim.x + threadIdx.x;
   for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
     cd.clear();
-    slot0 *buck = htl.hta.trees0[(r-1)/2][bucketid]; // optimize by updating previous buck?!
-    u32 bsize = eq->getnslots(r-1, bucketid);       // optimize by putting bucketsize with block?!
+    slot0 *buck = htl.hta.trees0[(r-1)/2][bucketid];
+    u32 bsize = eq->getnslots0(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
-      const slot0 *pslot1 = buck + s1;          // optimize by updating previous pslot1?!
+      const slot0 *pslot1 = buck + s1;
       if (!cd.addslot(s1, htl.getxhash0(pslot1)))
         continue;
       for (; cd.nextcollision(); ) {
@@ -490,13 +538,12 @@ __global__ void digitO(equi *eq, const u32 r) {
         const u32 xorslot = atomicAdd(&eq->nslots[1][xorbucketid], 1);
         if (xorslot >= NSLOTS)
           continue;
-        tree xort; xort.bucketid = bucketid;
-        xort.slotid0 = s0; xort.slotid1 = s1;
-#ifdef XINTREE
-          xort.xhash = xhash;
-#endif
         slot1 &xs = htl.hta.trees1[r/2][xorbucketid][xorslot];
-        xs.attr = xort;
+#ifdef XINTREE
+        xs.attr = tree(bucketid, s0, s1, xhash);
+#else
+        xs.attr = tree(bucketid, s0, s1);
+#endif
         for (u32 i=htl.dunits; i < htl.prevhashunits; i++)
           xs.hash[i-htl.dunits].word = pslot0->hash[i].word ^ pslot1->hash[i].word;
       }
@@ -510,10 +557,10 @@ __global__ void digitE(equi *eq, const u32 r) {
   const u32 id = blockIdx.x * blockDim.x + threadIdx.x;
   for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
     cd.clear();
-    slot1 *buck = htl.hta.trees1[(r-1)/2][bucketid]; // OPTIMIZE BY UPDATING PREVIOUS
-    u32 bsize = eq->getnslots(r-1, bucketid);
+    slot1 *buck = htl.hta.trees1[(r-1)/2][bucketid];
+    u32 bsize = eq->getnslots1(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
-      const slot1 *pslot1 = buck + s1;          // OPTIMIZE BY UPDATING PREVIOUS
+      const slot1 *pslot1 = buck + s1;
       if (!cd.addslot(s1, htl.getxhash1(pslot1)))
         continue;
       for (; cd.nextcollision(); ) {
@@ -544,13 +591,12 @@ __global__ void digitE(equi *eq, const u32 r) {
         const u32 xorslot = atomicAdd(&eq->nslots[0][xorbucketid], 1);
         if (xorslot >= NSLOTS)
           continue;
-        tree xort; xort.bucketid = bucketid;
-        xort.slotid0 = s0; xort.slotid1 = s1;
-#ifdef XINTREE
-          xort.xhash = xhash;
-#endif
         slot0 &xs = htl.hta.trees0[r/2][xorbucketid][xorslot];
-        xs.attr = xort;
+#ifdef XINTREE
+        xs.attr = tree(bucketid, s0, s1, xhash);
+#else
+        xs.attr = tree(bucketid, s0, s1);
+#endif
         for (u32 i=htl.dunits; i < htl.prevhashunits; i++)
           xs.hash[i-htl.dunits].word = pslot0->hash[i].word ^ pslot1->hash[i].word;
       }
@@ -566,7 +612,7 @@ __global__ void digit_1(equi *eq) {
   for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
     cd.clear();
     slot0 *buck = htl.hta.trees0[0][bucketid];
-    u32 bsize = eq->getnslots(0, bucketid);
+    u32 bsize = eq->getnslots0(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot0 *pslot1 = buck + s1;
       if (!cd.addslot(s1, htl.getxhash0(pslot1)))
@@ -576,21 +622,15 @@ __global__ void digit_1(equi *eq) {
         const slot0 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
           continue;
-        u32 xorbucketid;
-        u32 xhash;
-        const uchar *bytes0 = pslot0->hash->bytes, *bytes1 = pslot1->hash->bytes;
-        xorbucketid = ((((u32)(bytes0[htl.prevbo] ^ bytes1[htl.prevbo]) & 0xf) << 8)
-                          | (bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1])) << 4
-                  | (xhash = bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
-        xhash &= 0xf;
+        const u32 xor0 = pslot0->hash->word ^ pslot1->hash->word;
+        const u32 bexor = __byte_perm(xor0, 0, 0x0123);
+        const u32 xorbucketid = bexor >> 4 & BUCKMASK;
+        const u32 xhash = bexor & 0xf;
         const u32 xorslot = atomicAdd(&eq->nslots[1][xorbucketid], 1);
         if (xorslot >= NSLOTS)
           continue;
-        tree xort; xort.bucketid = bucketid;
-        xort.slotid0 = s0; xort.slotid1 = s1;
-        xort.xhash = xhash;
         slot1 &xs = htl.hta.trees1[0][xorbucketid][xorslot];
-        xs.attr = xort;
+        xs.attr = tree(bucketid, s0, s1, xhash);
         xs.hash[0].word = pslot0->hash[1].word ^ pslot1->hash[1].word;
         xs.hash[1].word = pslot0->hash[2].word ^ pslot1->hash[2].word;
         xs.hash[2].word = pslot0->hash[3].word ^ pslot1->hash[3].word;
@@ -607,7 +647,7 @@ __global__ void digit2(equi *eq) {
   for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
     cd.clear();
     slot1 *buck = htl.hta.trees1[0][bucketid];
-    u32 bsize = eq->getnslots(1, bucketid);
+    u32 bsize = eq->getnslots1(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot1 *pslot1 = buck + s1;
       if (!cd.addslot(s1, htl.getxhash1(pslot1)))
@@ -617,21 +657,16 @@ __global__ void digit2(equi *eq) {
         const slot1 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
           continue;
-        u32 xorbucketid;
-        u32 xhash;
-        const uchar *bytes0 = pslot0->hash->bytes, *bytes1 = pslot1->hash->bytes;
-        xorbucketid = ((u32)(bytes0[htl.prevbo] ^ bytes1[htl.prevbo]) << 8)
-                        | (bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]);
-                  xhash = (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
+        const u32 xor0 = pslot0->hash->word ^ pslot1->hash->word;
+        const u32 bexor = __byte_perm(xor0, 0, 0x0123);
+        const u32 xorbucketid = bexor >> 16;
+        const u32 xhash = bexor >> 12 & 0xf;
         const u32 xorslot = atomicAdd(&eq->nslots[0][xorbucketid], 1);
         if (xorslot >= NSLOTS)
           continue;
-        tree xort; xort.bucketid = bucketid;
-        xort.slotid0 = s0; xort.slotid1 = s1;
-        xort.xhash = xhash;
         slot0 &xs = htl.hta.trees0[1][xorbucketid][xorslot];
-        xs.attr = xort;
-        xs.hash[0].word = pslot0->hash[0].word ^ pslot1->hash[0].word;
+        xs.attr = tree(bucketid, s0, s1, xhash);
+        xs.hash[0].word = xor0;
         xs.hash[1].word = pslot0->hash[1].word ^ pslot1->hash[1].word;
         xs.hash[2].word = pslot0->hash[2].word ^ pslot1->hash[2].word;
         xs.hash[3].word = pslot0->hash[3].word ^ pslot1->hash[3].word;
@@ -647,7 +682,7 @@ __global__ void digit3(equi *eq) {
   for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
     cd.clear();
     slot0 *buck = htl.hta.trees0[1][bucketid];
-    u32 bsize = eq->getnslots(2, bucketid);
+    u32 bsize = eq->getnslots0(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot0 *pslot1 = buck + s1;
       if (!cd.addslot(s1, htl.getxhash0(pslot1)))
@@ -657,22 +692,17 @@ __global__ void digit3(equi *eq) {
         const slot0 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
           continue;
-        u32 xorbucketid;
-        u32 xhash;
-        const uchar *bytes0 = pslot0->hash->bytes, *bytes1 = pslot1->hash->bytes;
-        xorbucketid = ((((u32)(bytes0[htl.prevbo] ^ bytes1[htl.prevbo]) & 0xf) << 8)
-                          | (bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1])) << 4
-                  | (xhash = bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
-        xhash &= 0xf;
+        const u32 xor0 = pslot0->hash->word ^ pslot1->hash->word;
+        const u32 xor1 = pslot0->hash[1].word ^ pslot1->hash[1].word;
+        const u32 bexor = __byte_perm(xor0, xor1, 0x1234);
+        const u32 xorbucketid = bexor >> 4 & BUCKMASK;
+        const u32 xhash = bexor & 0xf;
         const u32 xorslot = atomicAdd(&eq->nslots[1][xorbucketid], 1);
         if (xorslot >= NSLOTS)
           continue;
-        tree xort; xort.bucketid = bucketid;
-        xort.slotid0 = s0; xort.slotid1 = s1;
-        xort.xhash = xhash;
         slot1 &xs = htl.hta.trees1[1][xorbucketid][xorslot];
-        xs.attr = xort;
-        xs.hash[0].word = pslot0->hash[1].word ^ pslot1->hash[1].word;
+        xs.attr = tree(bucketid, s0, s1, xhash);
+        xs.hash[0].word = xor1;
         xs.hash[1].word = pslot0->hash[2].word ^ pslot1->hash[2].word;
         xs.hash[2].word = pslot0->hash[3].word ^ pslot1->hash[3].word;
         xs.hash[3].word = pslot0->hash[4].word ^ pslot1->hash[4].word;
@@ -687,7 +717,7 @@ __global__ void digit4(equi *eq) {
   for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
     cd.clear();
     slot1 *buck = htl.hta.trees1[1][bucketid];
-    u32 bsize = eq->getnslots(3, bucketid);
+    u32 bsize = eq->getnslots1(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot1 *pslot1 = buck + s1;
       if (!cd.addslot(s1, htl.getxhash1(pslot1)))
@@ -697,21 +727,16 @@ __global__ void digit4(equi *eq) {
         const slot1 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
           continue;
-        u32 xorbucketid;
-        u32 xhash;
-        const uchar *bytes0 = pslot0->hash->bytes, *bytes1 = pslot1->hash->bytes;
-        xorbucketid = ((u32)(bytes0[htl.prevbo] ^ bytes1[htl.prevbo]) << 8)
-                        | (bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]);
-                  xhash = (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
+        const u32 xor0 = pslot0->hash->word ^ pslot1->hash->word;
+        const u32 bexor = __byte_perm(xor0, 0, 0x4123);
+        const u32 xorbucketid = bexor >> 8;
+        const u32 xhash = bexor >> 4 & 0xf;
         const u32 xorslot = atomicAdd(&eq->nslots[0][xorbucketid], 1);
         if (xorslot >= NSLOTS)
           continue;
-        tree xort; xort.bucketid = bucketid;
-        xort.slotid0 = s0; xort.slotid1 = s1;
-        xort.xhash = xhash;
         slot0 &xs = htl.hta.trees0[2][xorbucketid][xorslot];
-        xs.attr = xort;
-        xs.hash[0].word = pslot0->hash[0].word ^ pslot1->hash[0].word;
+        xs.attr = tree(bucketid, s0, s1, xhash);
+        xs.hash[0].word = xor0;
         xs.hash[1].word = pslot0->hash[1].word ^ pslot1->hash[1].word;
         xs.hash[2].word = pslot0->hash[2].word ^ pslot1->hash[2].word;
         xs.hash[3].word = pslot0->hash[3].word ^ pslot1->hash[3].word;
@@ -726,7 +751,7 @@ __global__ void digit5(equi *eq) {
   for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
     cd.clear();
     slot0 *buck = htl.hta.trees0[2][bucketid];
-    u32 bsize = eq->getnslots(4, bucketid);
+    u32 bsize = eq->getnslots0(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot0 *pslot1 = buck + s1;
       if (!cd.addslot(s1, htl.getxhash0(pslot1)))
@@ -736,22 +761,17 @@ __global__ void digit5(equi *eq) {
         const slot0 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
           continue;
-        u32 xorbucketid;
-        u32 xhash;
-        const uchar *bytes0 = pslot0->hash->bytes, *bytes1 = pslot1->hash->bytes;
-        xorbucketid = ((((u32)(bytes0[htl.prevbo] ^ bytes1[htl.prevbo]) & 0xf) << 8)
-                          | (bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1])) << 4
-                  | (xhash = bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
-        xhash &= 0xf;
+        const u32 xor0 = pslot0->hash->word ^ pslot1->hash->word;
+        const u32 xor1 = pslot0->hash[1].word ^ pslot1->hash[1].word;
+        const u32 bexor = __byte_perm(xor0, xor1, 0x2345);
+        const u32 xorbucketid = bexor >> 4 & BUCKMASK;
+        const u32 xhash = bexor & 0xf;
         const u32 xorslot = atomicAdd(&eq->nslots[1][xorbucketid], 1);
         if (xorslot >= NSLOTS)
           continue;
-        tree xort; xort.bucketid = bucketid;
-        xort.slotid0 = s0; xort.slotid1 = s1;
-        xort.xhash = xhash;
         slot1 &xs = htl.hta.trees1[2][xorbucketid][xorslot];
-        xs.attr = xort;
-        xs.hash[0].word = pslot0->hash[1].word ^ pslot1->hash[1].word;
+        xs.attr = tree(bucketid, s0, s1, xhash);
+        xs.hash[0].word = xor1;
         xs.hash[1].word = pslot0->hash[2].word ^ pslot1->hash[2].word;
         xs.hash[2].word = pslot0->hash[3].word ^ pslot1->hash[3].word;
       }
@@ -765,7 +785,7 @@ __global__ void digit6(equi *eq) {
   for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
     cd.clear();
     slot1 *buck = htl.hta.trees1[2][bucketid];
-    u32 bsize = eq->getnslots(5, bucketid);
+    u32 bsize = eq->getnslots1(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot1 *pslot1 = buck + s1;
       if (!cd.addslot(s1, htl.getxhash1(pslot1)))
@@ -775,21 +795,17 @@ __global__ void digit6(equi *eq) {
         const slot1 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
           continue;
-        u32 xorbucketid;
-        u32 xhash;
-        const uchar *bytes0 = pslot0->hash->bytes, *bytes1 = pslot1->hash->bytes;
-        xorbucketid = ((u32)(bytes0[htl.prevbo] ^ bytes1[htl.prevbo]) << 8)
-                        | (bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]);
-                  xhash = (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
+        const u32 xor0 = pslot0->hash->word ^ pslot1->hash->word;
+        const u32 xor1 = pslot0->hash[1].word ^ pslot1->hash[1].word;
+        const u32 bexor = __byte_perm(xor0, xor1, 0x2345);
+        const u32 xorbucketid = bexor >> 16;
+        const u32 xhash = bexor >> 12 & 0xf;
         const u32 xorslot = atomicAdd(&eq->nslots[0][xorbucketid], 1);
         if (xorslot >= NSLOTS)
           continue;
-        tree xort; xort.bucketid = bucketid;
-        xort.slotid0 = s0; xort.slotid1 = s1;
-        xort.xhash = xhash;
         slot0 &xs = htl.hta.trees0[3][xorbucketid][xorslot];
-        xs.attr = xort;
-        xs.hash[0].word = pslot0->hash[1].word ^ pslot1->hash[1].word;
+        xs.attr = tree(bucketid, s0, s1, xhash);
+        xs.hash[0].word = xor1;
         xs.hash[1].word = pslot0->hash[2].word ^ pslot1->hash[2].word;
       }
     }
@@ -802,7 +818,7 @@ __global__ void digit7(equi *eq) {
   for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
     cd.clear();
     slot0 *buck = htl.hta.trees0[3][bucketid];
-    u32 bsize = eq->getnslots(6, bucketid);
+    u32 bsize = eq->getnslots0(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot0 *pslot1 = buck + s1;
       if (!cd.addslot(s1, htl.getxhash0(pslot1)))
@@ -812,22 +828,16 @@ __global__ void digit7(equi *eq) {
         const slot0 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
           continue;
-        u32 xorbucketid;
-        u32 xhash;
-        const uchar *bytes0 = pslot0->hash->bytes, *bytes1 = pslot1->hash->bytes;
-        xorbucketid = ((((u32)(bytes0[htl.prevbo] ^ bytes1[htl.prevbo]) & 0xf) << 8)
-                          | (bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1])) << 4
-                  | (xhash = bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
-        xhash &= 0xf;
+        const u32 xor0 = pslot0->hash->word ^ pslot1->hash->word;
+        const u32 bexor = __byte_perm(xor0, 0, 0x4012);
+        const u32 xorbucketid = bexor >> 4 & BUCKMASK;
+        const u32 xhash = bexor & 0xf;
         const u32 xorslot = atomicAdd(&eq->nslots[1][xorbucketid], 1);
         if (xorslot >= NSLOTS)
           continue;
-        tree xort; xort.bucketid = bucketid;
-        xort.slotid0 = s0; xort.slotid1 = s1;
-        xort.xhash = xhash;
         slot1 &xs = htl.hta.trees1[3][xorbucketid][xorslot];
-        xs.attr = xort;
-        xs.hash[0].word = pslot0->hash[0].word ^ pslot1->hash[0].word;
+        xs.attr = tree(bucketid, s0, s1, xhash);
+        xs.hash[0].word = xor0;
         xs.hash[1].word = pslot0->hash[1].word ^ pslot1->hash[1].word;
       }
     }
@@ -840,9 +850,9 @@ __global__ void digit8(equi *eq) {
   for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
     cd.clear();
     slot1 *buck = htl.hta.trees1[3][bucketid];
-    u32 bsize = eq->getnslots(7, bucketid);
+    u32 bsize = eq->getnslots1(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
-      const slot1 *pslot1 = buck + s1;          // OPTIMIZE BY UPDATING PREVIOUS
+      const slot1 *pslot1 = buck + s1;
       if (!cd.addslot(s1, htl.getxhash1(pslot1)))
         continue;
       for (; cd.nextcollision(); ) {
@@ -850,21 +860,17 @@ __global__ void digit8(equi *eq) {
         const slot1 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
           continue;
-        u32 xorbucketid;
-        u32 xhash;
-        const uchar *bytes0 = pslot0->hash->bytes, *bytes1 = pslot1->hash->bytes;
-        xorbucketid = ((u32)(bytes0[htl.prevbo] ^ bytes1[htl.prevbo]) << 8)
-                        | (bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]);
-                  xhash = (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
+        const u32 xor0 = pslot0->hash->word ^ pslot1->hash->word;
+        const u32 xor1 = pslot0->hash[1].word ^ pslot1->hash[1].word;
+        const u32 bexor = __byte_perm(xor0, xor1, 0x3456);
+        const u32 xorbucketid = bexor >> 16;
+        const u32 xhash = bexor >> 12 & 0xf;
         const u32 xorslot = atomicAdd(&eq->nslots[0][xorbucketid], 1);
         if (xorslot >= NSLOTS)
           continue;
-        tree xort; xort.bucketid = bucketid;
-        xort.slotid0 = s0; xort.slotid1 = s1;
-        xort.xhash = xhash;
         slot0 &xs = htl.hta.trees0[4][xorbucketid][xorslot];
-        xs.attr = xort;
-        xs.hash[0].word = pslot0->hash[1].word ^ pslot1->hash[1].word;
+        xs.attr = tree(bucketid, s0, s1, xhash);
+        xs.hash[0].word = xor1;
       }
     }
   }
@@ -878,7 +884,7 @@ __global__ void digitK(equi *eq) {
   for (u32 bucketid = id; bucketid < NBUCKETS; bucketid += eq->nthreads) {
     cd.clear();
     slot0 *buck = htl.hta.trees0[(WK-1)/2][bucketid];
-    u32 bsize = eq->getnslots(WK-1, bucketid);
+    u32 bsize = eq->getnslots0(bucketid); // assume WK odd
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot0 *pslot1 = buck + s1;
       if (!cd.addslot(s1, htl.getxhash0(pslot1))) // assume WK odd
@@ -887,9 +893,11 @@ __global__ void digitK(equi *eq) {
         const u32 s0 = cd.slot();
         const slot0 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash)) {
-          tree xort; xort.bucketid = bucketid;
-          xort.slotid0 = s0; xort.slotid1 = s1;
-          eq->candidate(xort);
+#ifdef XINTREE
+          eq->candidate(tree(bucketid, s0, s1, 0));
+#else
+          eq->candidate(tree(bucketid, s0, s1));
+#endif
         }
       }
     }
@@ -937,6 +945,11 @@ int main(int argc, char **argv) {
   printf(") with %d %d-bits digits and %d threads (%d per block)\n", NDIGITS, DIGITBITS, nthreads, tpb);
   equi eq(nthreads);
 
+  char headernonce[HEADERNONCELEN];
+  u32 hdrlen = strlen(header);
+  memcpy(headernonce, header, hdrlen);
+  memset(headernonce+hdrlen, 0, sizeof(headernonce)-hdrlen);
+
   u32 *heap0, *heap1;
   checkCudaErrors(cudaMalloc((void**)&heap0, sizeof(digit0)));
   checkCudaErrors(cudaMalloc((void**)&heap1, sizeof(digit1)));
@@ -960,7 +973,8 @@ int main(int argc, char **argv) {
   u32 sumnsols = 0;
   for (int r = 0; r < range; r++) {
     cudaEventRecord(start, NULL);
-    eq.setnonce(header, strlen(header), nonce+r);
+    ((u32 *)headernonce)[32] = htole32(nonce+r);
+    eq.setheadernonce(headernonce, sizeof(headernonce));
     checkCudaErrors(cudaMemcpy(device_eq, &eq, sizeof(equi), cudaMemcpyHostToDevice));
     printf("Digit 0\n");
     digitH<<<nthreads/tpb,tpb >>>(device_eq);

@@ -34,6 +34,9 @@ equidev1:	equi.h equi_dev_miner.h equi_dev_miner.cpp Makefile
 eqcuda:	equi_miner.cu equi.h blake2b.cu Makefile
 	nvcc -DXINTREE -DUNROLL -arch sm_35 equi_miner.cu blake/blake2b.cpp -o eqcuda
 
+eqcudah:	equi_miner.cu equi.h blake2b.cu Makefile
+	nvcc -DHIST -DXINTREE -DUNROLL -arch sm_35 equi_miner.cu blake/blake2b.cpp -o eqcudah
+
 devcuda:	dev_miner.cu equi.h blake2b.cu Makefile
 	nvcc -DXINTREE -DUNROLL -arch sm_35 dev_miner.cu blake/blake2b.cpp -o devcuda
 
