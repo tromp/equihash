@@ -1,22 +1,38 @@
 // Equihash solver
 // Copyright (c) 2016 John Tromp
 
-// Fix N, K, such that n = N/(k+1) is integer
-// Fix M = 2^{n+1} hashes each of length N bits,
-// H_0, ... , H_{M-1}, generated fom (n+1)-bit indices.
-// Problem: find binary tree on 2^K distinct indices,
-// for which the exclusive-or of leaf hashes is all 0s.
+// Equihash presents the following problem
+//
+// Fix N, K, such that N is a multiple of K+1
+// Let integer n = N/(K+1), and view N-bit words
+// as having K+1 "digits" of n bits each
+// Fix M = 2^{n+1} N-bit hashes H_0, ... , H_{M-1}
+// as outputs of a hash function applied to an (n+1)-bit index
+//
+// Problem: find a binary tree on 2^K distinct indices,
+// for which the exclusive-or of leaf hashes is all 0s
 // Additionally, it should satisfy the Wagner conditions:
-// for each height i subtree, the exclusive-or
-// of its 2^i corresponding hashes starts with i*n 0 bits,
-// and for i>0 the leftmost leaf of its left subtree
-// is less than the leftmost leaf of its right subtree
-
-// The algorithm below solves this by maintaining the tree
-// in a graph of K layers, each split into buckets
-// with buckets indexed by the first n-RESTBITS bits following
-// the i*n 0s, each bucket having 4 * 2^RESTBITS slots,
-// twice the number of subtrees expected to land there.
+// 1) for each height i subtree, the exclusive-or
+// of its 2^i leaf hashes starts with i*n 0 bits,
+// 2) the leftmost leaf of any left subtree is less
+// than the leftmost leaf of the corresponding right subtree
+//
+// The algorithm below solves this by storing trees
+// as a directed acyclic graph of K layers
+// The n digit bits are split into
+// n-RESTBITS bucket bits and RESTBITS leftover bits
+// Each layer i, consisting of height i subtrees
+// whose xor starts with i*n 0s, is partitioned into
+// 2^{n-RESTBITS} buckets according to the next n-RESTBITS
+// in the xor
+// Within each bucket, trees whose xor match in the
+// next RESTBITS bits are combined to produce trees
+// in the next layer
+// To eliminate trees with duplicated indices,
+// we simply test if the last 32 bits of the xor are 0,
+// and if so, assume that this is due to index duplication
+// In practice this works very well to avoid bucket overflow
+// and produces negligible false positives
 
 #include "equi.h"
 #include <stdio.h>
@@ -31,9 +47,11 @@
 #define htobe32(x) OSSwapHostToBigInt32(x)
 #endif
 
+// u32 already defined in equi.h
 typedef uint16_t u16;
 typedef uint64_t u64;
 
+// rquired for avoiding multio-threading race conflicts
 #ifdef ATOMIC
 #include <atomic>
 typedef std::atomic<u32> au32;
@@ -48,47 +66,63 @@ typedef u32 au32;
 // 2_log of number of buckets
 #define BUCKBITS (DIGITBITS-RESTBITS)
 
+// by default buckets have a capacity of twice their expected size
+// but this factor reduced it accordingly
 #ifndef SAVEMEM
 #if RESTBITS == 4
 // can't save memory in such small buckets
 #define SAVEMEM 1
 #elif RESTBITS >= 8
-// take advantage of law of large numbers (sum of 2^8 random numbers)
-// this reduces (200,9) memory to under 144MB, with negligible discarding
+// an expected size of at least 512 has such relatively small
+// standard deviation that we can reduce capacity with negligible discarding
+// this value reduces (200,9) memory to under 144MB
 #define SAVEMEM 9/14
 #endif
 #endif
 
 // number of buckets
 static const u32 NBUCKETS = 1<<BUCKBITS;
-// bucket mask
+// corresponding bucket mask
 static const u32 BUCKMASK = NBUCKETS-1;
 // 2_log of number of slots per bucket
 static const u32 SLOTBITS = RESTBITS+1+1;
+// default bucket capacity
 static const u32 SLOTRANGE = 1<<SLOTBITS;
+// corresponding SLOTBITS mask
+static const u32 SLOTMASK = SLOTRANGE-1;
+// most significat bit in SLOTMASK
 static const u32 SLOTMSB = 1<<(SLOTBITS-1);
 // number of slots per bucket
 static const u32 NSLOTS = SLOTRANGE * SAVEMEM;
 // number of per-xhash slots
 static const u32 XFULL = 16;
-// SLOTBITS mask
-static const u32 SLOTMASK = SLOTRANGE-1;
-// number of possible values of xhash (rest of n) bits
+// number of possible values of RESTBITS bits
 static const u32 NRESTS = 1<<RESTBITS;
 // number of blocks of hashes extracted from single 512 bit blake2b output
 static const u32 NBLOCKS = (NHASHES+HASHESPERBLAKE-1)/HASHESPERBLAKE;
-// nothing larger found in 100000 runs
+// more than 8 solutions are rare (less than one in 100000 runs)
 static const u32 MAXSOLS = 8;
 
 // tree node identifying its children as two different slots in
-// a bucket on previous layer with the same rest bits (x-tra hash)
+// a bucket on previous layer with matching rest bits (x-tra hash)
 struct tree {
-  u32 bid_s0_s1; // manual bitfields
+  // formerly i had these bitfields
+  // unsigned bucketid : BUCKBITS;
+  // unsigned slotid0  : SLOTBITS;
+  // unsigned slotid1 : SLOTBITS;
+  // but these were poorly optimized by the compiler
+  // so now we do things "manually"
+  u32 bid_s0_s1;
 
+  // constructor for height 0 trees stores index instead
   tree(const u32 idx) {
     bid_s0_s1 = idx;
   }
   tree(const u32 bid, const u32 s0, const u32 s1) {
+// SLOTDIFF saves 1 bit by encoding the distance between
+// the two slots modulo SLOTRANGE instead, and picking
+// slotid0 such that this distance is at most SLOTRANGE/2
+// the extra branching involved gives noticeable slowdown
 #ifdef SLOTDIFF
     u32 ds10 = (s1 - s0) & SLOTMASK;
     if (ds10 & SLOTMSB) {
@@ -100,9 +134,11 @@ struct tree {
     bid_s0_s1 = (((bid << SLOTBITS) | s0) << SLOTBITS) | s1;
 #endif
   }
+  // retrieve hash index from tree(const u32 idx) constructor
   u32 getindex() const {
     return bid_s0_s1;
   }
+  // retrieve bucket index
   u32 bucketid() const {
 #ifdef SLOTDIFF
     return bid_s0_s1 >> (2 * SLOTBITS - 1);
@@ -110,6 +146,7 @@ struct tree {
     return bid_s0_s1 >> (2 * SLOTBITS);
 #endif
   }
+  // retrieve first slot index
   u32 slotid0() const {
 #ifdef SLOTDIFF
     return (bid_s0_s1 >> (SLOTBITS-1)) & SLOTMASK;
@@ -117,6 +154,7 @@ struct tree {
     return (bid_s0_s1 >> SLOTBITS) & SLOTMASK;
 #endif
   }
+  // retrieve second slot index
   u32 slotid1() const {
 #ifdef SLOTDIFF
     return (slotid0() + 1 + (bid_s0_s1 & (SLOTMASK>>1))) & SLOTMASK;
@@ -126,6 +164,12 @@ struct tree {
   }
 };
 
+// each bucket slot occupies a variable number of hash/tree units,
+// all but the last of which hold the xor over all leaf hashes,
+// or what's left of it after stripping the initial i*n 0s
+// the last unit holds the tree node itself
+// the hash is sometimes accessed 32 bits at a time (word)
+// and sometimes 8 bits at a time (bytes)
 union htunit {
   tree tag;
   u32 word;
@@ -148,6 +192,43 @@ typedef bucket0 digit0[NBUCKETS];
 typedef bucket1 digit1[NBUCKETS];
 typedef au32 bsizes[NBUCKETS];
 
+// The algorithm proceeds in K+1 rounds, one for each digit
+// All data is stored in two heaps,
+// heap0 of type digit0, and heap1 of type digit1
+// The following table shows the layout of these heaps
+// in each round, which is an optimized version
+// of xenoncat's fixed memory layout, avoiding any waste
+// Each line shows only a single slot, which is actually
+// replicated NSLOTS * NBUCKETS times
+//
+//             heap0         heap1
+// round  hashes   tree   hashes tree
+// 0      A A A A A A 0   . . . . . .
+// 1      A A A A A A 0   B B B B B 1
+// 2      C C C C C 2 0   B B B B B 1
+// 3      C C C C C 2 0   D D D D 3 1
+// 4      E E E E 4 2 0   D D D D 3 1
+// 5      E E E E 4 2 0   F F F 5 3 1
+// 6      G G 6 . 4 2 0   F F F 5 3 1
+// 7      G G 6 . 4 2 0   H H 7 5 3 1
+// 8      I 8 6 . 4 2 0   H H 7 5 3 1
+//
+// Round 0 generates hashes and stores them in the buckets
+// of heap0 according to the initial n-RESTBITS bits
+// These hashes are denoted A above and followed by the
+// tree tag denoted 0
+// In round 1 we combine each pair of slots in the same bucket
+// with matching RESTBITS of digit 0 and store the resulting
+// 1-tree in heap1 with its xor hash denoted B
+// Upon finishing round 1, the A space is no longer needed,
+// and is re-used in round 2 to store both the shorter C hashes,
+// and their tree tags denoted 2
+// Continuing in this manner, each round reads buckets from one
+// heap, and writes buckets in the other heap.
+// In the final round K, all pairs leading to 0 xors are identified
+// and their leafs recovered through the DAG of tree nodes
+
+// convenience function
 u32 min(const u32 a, const u32 b) {
   return a < b ? a : b;
 }
@@ -158,6 +239,7 @@ u32 hashsize(const u32 r) {
   return (hashbits + 7) / 8;
 }
 
+// convert bytes into words,rounding up
 u32 hashwords(u32 bytes) {
   return (bytes + 3) / 4;
 }
@@ -171,17 +253,6 @@ struct htalloc {
     alloced = 0;
   }
   void alloctrees() {
-// optimize xenoncat's fixed memory layout, avoiding any waste
-// digit  hashes   tree   hashes tree
-// 0      A A A A A A 0   . . . . . .
-// 1      A A A A A A 0   B B B B B 1
-// 2      C C C C C 2 0   B B B B B 1
-// 3      C C C C C 2 0   D D D D 3 1
-// 4      E E E E 4 2 0   D D D D 3 1
-// 5      E E E E 4 2 0   F F F 5 3 1
-// 6      G G 6 . 4 2 0   F F F 5 3 1
-// 7      G G 6 . 4 2 0   H H 7 5 3 1
-// 8      I 8 6 . 4 2 0   H H 7 5 3 1
     assert(DIGITBITS >= 16); // ensures hashes shorten by 1 unit every 2 digits
     heap0 = (bucket0 *)alloc(NBUCKETS, sizeof(bucket0));
     heap1 = (bucket1 *)alloc(NBUCKETS, sizeof(bucket1));
@@ -967,7 +1038,7 @@ void *worker(void *vp) {
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(0);
   barrier(&eq->barry);
-#if WN == 200 && WK == 9 && RESTBITS == 8
+#if WN == 200 && WK == 9 && RESTBITS == 8 && defined UNROLL
   eq->digit1(tp->id);
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(1);
