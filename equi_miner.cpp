@@ -66,13 +66,12 @@ int main(int argc, char **argv) {
       int err = pthread_join(threads[t].thread, NULL);
       assert(err == 0);
     }
-    u32 nsols = 0;
-    for (unsigned s = 0; s < eq.nsols; s++) {
-      nsols++;
+    u32 nsols, maxsols = min(MAXSOLS, eq.nsols);
+    for (nsols = 0; nsols < maxsols; nsols++) {
       if (showsol) {
         printf("\nSolution");
         for (u32 i = 0; i < PROOFSIZE; i++)
-          printf(" %jx", (uintmax_t)eq.sols[s][i]);
+          printf(" %jx", (uintmax_t)eq.sols[nsols][i]);
       }
     }
     printf("\n%d solutions\n", nsols);
