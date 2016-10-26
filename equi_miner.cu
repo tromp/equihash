@@ -1023,8 +1023,8 @@ int main(int argc, char **argv) {
     cudaEventElapsedTime(&duration, start, stop);
       printf("%d rounds completed in %.3f seconds.\n", WK, duration / 1000.0f);
 
-    u32 nsols = 0;
-    for (unsigned s = 0; s < eq.nsols; s++) {
+    u32 s, nsols, maxsols = min(MAXSOLS, eq.nsols);
+    for (s = nsols = 0; s < maxsols; s++) {
       if (duped(sols[s])) {
         printf("Duped!\n");
         continue;
