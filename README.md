@@ -64,7 +64,7 @@ Performance summary (on 4GHz i7-4790K and NVidia GTX980):
 
 - eqcuda:      23.6 Sol/s
 
-And now, for something completely different: (144,5)
+And now, for something completely different: (144,5) taking 2.6 GB of memory
 
 - eq1445 -t 8:     1.0 Sol/s
 - eq1445avx2 -t 8: 1.2 Sol/s
