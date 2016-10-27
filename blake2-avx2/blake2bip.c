@@ -298,43 +298,51 @@ ALIGN(64) static const uint32_t indices[12][16] = {
 } while(0)
 
 void blake2bip_final(const blake2b_state *S, uchar *out, u32 blockidx) {
-  ALIGN(64) uint8_t buffer[4 * BLAKE2B_BLOCKBYTES]; // 4 * 128
-  memset(buffer, 0, 4 * BLAKE2B_BLOCKBYTES); // zero whole buffer
-  memcpy(buffer, S->buf, S->buflen);
-  uint32_t b = htole32(4 * blockidx);
-  memcpy(buffer + S->buflen, &b, 4);
-  size_t inlen = S->buflen + 4;
-  buffer[0*128+inlen-4] += 0;
-  memcpy(buffer + 128, buffer, inlen);
-  buffer[1*128+inlen-4] += 1;
-  memcpy(buffer + 256, buffer, inlen);
-  buffer[2*128+inlen-4] += 2;
-  memcpy(buffer + 384, buffer, inlen);
-  buffer[3*128+inlen-4] += 3;
-
-  __m256i v[16], s[8];                              // 16 * 32, 8 * 32
+  __m256i v[16], s[8], iv[8], w[16];                             // 16 * 32, 8 * 32
   union {
     __m256i  v;
     uint64_t w[4];
   } counter;
-  int i;
+  uint32_t b;
+  size_t inlen;
+  int i, r;
+
+  ALIGN(64) uint8_t buffer[4 * BLAKE2B_BLOCKBYTES]; // 4 * 128
+  memset(buffer, 0, 4 * BLAKE2B_BLOCKBYTES); // zero whole buffer
+  for (i = 0; i < 4; i++) {
+    memcpy(buffer+128*i, S->buf, S->buflen);
+    b = htole32(4 * blockidx + i);
+    memcpy(buffer+128*i + S->buflen, &b, 4);
+  }
+  inlen = S->buflen + 4;
 
   for(i = 0; i < 8; ++i) {
     v[i] = _mm256_set1_epi64x(S->h[i]);       // initialize all 256/64 = 4 lanes
   }
 
-#if 0 // these look blake2bp specific
-  v[0] = XOR(v[0], _mm256_set1_epi64x(0x02040040UL));
-  v[1] = XOR(v[1], _mm256_set_epi64x(3, 2, 1, 0));
-  v[2] = XOR(v[2], _mm256_set1_epi64x(0x00004000UL));
-#endif
-
-  __m256i x4 = _mm256_set_epi64x( 0,  0,  0,inlen);
-  __m256i f0 = _mm256_set_epi64x(~0, ~0, ~0,   ~0);
+  __m256i x4 = _mm256_set1_epi64x(128+inlen);
+  __m256i f0 = _mm256_set1_epi64x(~0);
 
   counter.v  = _mm256_add_epi64(counter.v, x4);
 
-  BLAKE2B_COMPRESS_V4(v, buffer, counter.v, f0);
+  for(i = 0; i < 8; ++i) {
+    iv[i] = v[i];
+  }
+  v[ 8] = _mm256_set1_epi64x(blake2b_IV[0]);
+  v[ 9] = _mm256_set1_epi64x(blake2b_IV[1]);
+  v[10] = _mm256_set1_epi64x(blake2b_IV[2]);
+  v[11] = _mm256_set1_epi64x(blake2b_IV[3]);
+  v[12] = XOR(_mm256_set1_epi64x(blake2b_IV[4]), counter.v);
+  v[13] = _mm256_set1_epi64x(blake2b_IV[5]);
+  v[14] = XOR(_mm256_set1_epi64x(blake2b_IV[6]), f0);
+  v[15] = _mm256_set1_epi64x(blake2b_IV[7]);
+  BLAKE2B_LOADMSG_V4(w, buffer);
+  for(r = 0; r < 12; ++r) {
+    BLAKE2B_ROUND_V4(v, w, r);
+  }
+  for(i = 0; i < 8; ++i) {
+    v[i] = XOR(XOR(v[i], v[i+8]), iv[i]);
+  }
 
   BLAKE2B_UNPACK_STATE_V4(s, v);
 
