@@ -564,7 +564,7 @@ struct equi {
     }
   };
 
-#ifdef __AVX2__
+#ifdef USE_AVX2
 static const u32 BLAKESINPARALLEL = 4;
 #else
 static const u32 BLAKESINPARALLEL = 1;
@@ -580,7 +580,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
     uchar hashes[BLAKESINPARALLEL * 64];
     blake2b_state state0 = blake_ctx;
     for (u32 block = id; block < NBLOCKS; block += nthreads) {
-#ifdef __AVX2__
+#ifdef USE_AVX2
       blake2bip_final(&state0, hashes, block);
 #else
       blake2b_state state = state0;

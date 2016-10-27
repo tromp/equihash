@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
   assert(threads);
   equi eq(nthreads);
   printf("Using %dMB of memory", 1 + eq.hta.alloced / 0x100000);
-#ifdef __AVX2__ 
+#ifdef USE_AVX2
   printf(" and AVX2 intrinsics to compute 4-way blake2b\n");
 #else
   printf("; no AVX2 detected\n");

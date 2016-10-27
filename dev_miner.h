@@ -83,14 +83,6 @@ typedef u32 au32;
 #endif
 #endif
 
-#ifdef __AVX2__
-#define BLAKESINPARALLEL 4
-#elif defined __AVX__
-#define BLAKESINPARALLEL 2
-#else
-#define BLAKESINPARALLEL 1
-#endif 
-
 // number of buckets
 static const u32 NBUCKETS = 1<<BUCKBITS;
 // bucket mask
@@ -105,10 +97,6 @@ static const u32 NSLOTS = SLOTRANGE * SAVEMEM;
 static const u32 SLOTMASK = SLOTRANGE-1;
 // number of possible values of xhash (rest of n) bits
 static const u32 NRESTS = 1<<RESTBITS;
-// number of hashes extracted from BLAKESINPARALLEL blake2b outputs
-static const u32 HASHESPERBLOCK = BLAKESINPARALLEL*HASHESPERBLAKE;
-// number of blocks of parallel blake2b calls
-static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 // nothing larger found in 100000 runs
 static const u32 MAXSOLS = 8;
 
@@ -531,6 +519,12 @@ struct equi {
       return s0;
     }
   };
+
+  static const u32 #define BLAKESINPARALLEL = 4;
+  // number of hashes extracted from BLAKESINPARALLEL blake2b outputs
+  static const u32 HASHESPERBLOCK = BLAKESINPARALLEL*HASHESPERBLAKE;
+  // number of blocks of parallel blake2b calls
+  static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 
   void digit0(const u32 id) {
     htlayout htl(this, 0);
