@@ -7,6 +7,12 @@
 #include "blake2b-common.h"
 #include "blake2bip.h"
 
+#ifdef __APPLE__
+#include <machine/endian.h>
+#include <libkern/OSByteOrder.h>
+#define htole32(x) OSSwapHostToLittleInt32(x)
+#endif
+
 ALIGN(64) static const uint64_t blake2b_IV[8] = {
   UINT64_C(0x6A09E667F3BCC908), UINT64_C(0xBB67AE8584CAA73B),
   UINT64_C(0x3C6EF372FE94F82B), UINT64_C(0xA54FF53A5F1D36F1),

@@ -1,8 +1,9 @@
 // Equihash solver
 // Copyright (c) 2016 John Tromp
 
-// This development version uses xenoncat's highly optimized
-// 4-way parallel blake2b implementation
+// This semi-development version uses Samuel Neves'
+// AVX2-optimized blake2bp code from https://github.com/sneves/blake2-avx2
+// modified to perform a 4-way parallel blake2b_final
 
 // Fix N, K, such that n = N/(k+1) is integer
 // Fix M = 2^{n+1} hashes each of length N bits,
