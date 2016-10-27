@@ -70,3 +70,4 @@ And now, for something completely different: (144,5) taking 2.6 GB of memory
 - eq1445avx2 -t 8: 1.2 Sol/s
 
 - eqcuda1445:      2.2 Sol/s
+
