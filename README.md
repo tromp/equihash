@@ -32,7 +32,7 @@ which gave a nice speed boost for that case.
 Since then I reduced the number of buckets in the cpu solver from 2^16 to 2^12,
 which allowed for reducing the bucket space overhead. I borrowed from xenoncat
 the idea to allocate all memory statically, and found a way to improve upon his memory layout,
-reducing waste by about 7%.
+reducing waste by about 7%. My solver now needs only 144MB compared to xenoncat's 178MB.
 
 Seeing that my solver was spending 45% of runtime on hashing, I asked xenoncat if (s)he
 could make their assembly blake2b implementation available through a C binding, which s(he)
