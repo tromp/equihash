@@ -82,24 +82,15 @@ typedef u32 au32;
 #endif
 #endif
 
-// number of buckets
-static const u32 NBUCKETS = 1<<BUCKBITS;
-// corresponding bucket mask
-static const u32 BUCKMASK = NBUCKETS-1;
-// 2_log of number of slots per bucket
-static const u32 SLOTBITS = RESTBITS+1+1;
-// default bucket capacity
-static const u32 SLOTRANGE = 1<<SLOTBITS;
-// corresponding SLOTBITS mask
-static const u32 SLOTMASK = SLOTRANGE-1;
-// most significat bit in SLOTMASK
-static const u32 SLOTMSB = 1<<(SLOTBITS-1);
-// number of slots per bucket
-static const u32 NSLOTS = SLOTRANGE * SAVEMEM;
-// number of possible values of RESTBITS bits
-static const u32 NRESTS = 1<<RESTBITS;
-// more than 8 solutions are rare (less than one in 100000 runs)
-static const u32 MAXSOLS = 8;
+static const u32 NBUCKETS = 1<<BUCKBITS;    // number of buckets
+static const u32 BUCKMASK = NBUCKETS-1;     // corresponding bucket mask
+static const u32 SLOTBITS = RESTBITS+1+1;   // 2_log of number of slots per bucket
+static const u32 SLOTRANGE = 1<<SLOTBITS;   // default bucket capacity
+static const u32 SLOTMASK = SLOTRANGE-1;    // corresponding SLOTBITS mask
+static const u32 SLOTMSB = 1<<(SLOTBITS-1); // most significat bit in SLOTMASK
+static const u32 NSLOTS = SLOTRANGE * SAVEMEM; // number of slots per bucket
+static const u32 NRESTS = 1<<RESTBITS;      // number of possible values of RESTBITS bits
+static const u32 MAXSOLS = 8;               // more than 8 solutions are rare
 
 // tree node identifying its children as two different slots in
 // a bucket on previous layer with matching rest bits (x-tra hash)
@@ -267,16 +258,17 @@ struct htalloc {
   }
 };
 
+// main solver object, shared between all threads
 struct equi {
-  blake2b_state blake_ctx;
-  htalloc hta;
-  bsizes *nslots;
-  proof *sols;
-  au32 nsols;
+  blake2b_state blake_ctx; // holds blake2b midstate after call to setheadernounce
+  htalloc hta;             // holds allocated heaps
+  bsizes *nslots;          // counts number of slots used in buckets
+  proof *sols;             // store found solutions here (only first MAXSOLS)
+  au32 nsols;              // number of solutions found
   u32 nthreads;
-  u32 bfull;
-  u32 hfull;
-  pthread_barrier_t barry;
+  u32 bfull;               // count number of times bucket can't fit new item
+  u32 hfull;               // count number of xor-ed hash with last 32 bits zero
+  pthread_barrier_t barry; // used to sync threads
   equi(const u32 n_threads) {
     assert(sizeof(htunit) == 4);
     assert(WK&1); // assumed in candidate() calling indices1()
@@ -292,11 +284,13 @@ struct equi {
     free(nslots);
     free(sols);
   }
+  // prepare blake2b midstate for new run and initialize counters
   void setheadernonce(const char *headernonce, const u32 len) {
     setheader(&blake_ctx, headernonce);
     memset(nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
     nsols = bfull = hfull = 0;
   }
+  // get heap0 bucket size in threadsafe manner
   u32 getslot0(const u32 bucketi) {
 #ifdef ATOMIC
     return std::atomic_fetch_add_explicit(&nslots[0][bucketi], 1U, std::memory_order_relaxed);
@@ -304,6 +298,7 @@ struct equi {
     return nslots[0][bucketi]++;
 #endif
   }
+  // get heap1 bucket size in threadsafe manner
   u32 getslot1(const u32 bucketi) {
 #ifdef ATOMIC
     return std::atomic_fetch_add_explicit(&nslots[1][bucketi], 1U, std::memory_order_relaxed);
@@ -311,18 +306,23 @@ struct equi {
     return nslots[1][bucketi]++;
 #endif
   }
+  // get old heap0 bucket size and clear it for next round
   u32 getnslots0(const u32 bid) {
     au32 &nslot = nslots[0][bid];
     const u32 n = min(nslot, NSLOTS);
     nslot = 0;
     return n;
   }
+  // get old heap1 bucket size and clear it for next round
   u32 getnslots1(const u32 bid) {
     au32 &nslot = nslots[1][bid];
     const u32 n = min(nslot, NSLOTS);
     nslot = 0;
     return n;
   }
+// this was an experiment that turned out to be a slowdown
+// one can integrate a merge sort into the index recovery
+// but due to the memcpy's it's slower at recognizing dupes
 #ifdef MERGESORT
   // if merged != 0, mergesort indices and return true if dupe found
   // if merged == 0, order indices as in Wagner condition
@@ -380,6 +380,10 @@ struct equi {
 #endif
     if (soli < MAXSOLS) listindices1(WK, t, sols[soli], 0);
   }
+// this is a differrent way to recognize most (but not all) dupes
+// unlike MERGESORT it doesn't end up sorting the indices,
+// but the few remaining candidates can easily
+// affort to have a qsort applied to them in order to find remaining dupes
 #else
   bool orderindices(u32 *indices, u32 size) {
     if (indices[0] > indices[size]) {
@@ -397,6 +401,8 @@ struct equi {
     if (r == 0) {
       u32 idx = t.getindex();
       if (dupes) {
+      // recognize most dupes by storing last seen index
+      // with same K least significant bits in array dupes
         u32 bin = idx & (PROOFSIZE-1);
         if (idx == dupes[bin]) return true;
         dupes[bin] = idx;
@@ -411,6 +417,7 @@ struct equi {
         || listindices1(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
         || (!dupes && orderindices(indices, size));
   }
+  // need separate instance for accessing (differently typed) heap1
   bool listindices1(u32 r, const tree t, u32 *indices, u32 *dupes) {
     const slot0 *buck = hta.heap0[t.bucketid()];
     const u32 size = 1 << --r;
@@ -419,24 +426,31 @@ struct equi {
         || listindices0(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
         || (!dupes && orderindices(indices, size));
   }
+  // check a candidate that resulted in 0 xor
+  // add as solution, with proper subtree ordering, if it has unique indices
   void candidate(const tree t) {
     proof prf, dupes;
     memset(dupes, 0xffff, sizeof(proof));
     if (listindices1(WK, t, prf, dupes)) return; // assume WK odd
+    // it survived the probable dupe test, now check fully
     qsort(prf, PROOFSIZE, sizeof(u32), &compu32);
     for (u32 i=1; i<PROOFSIZE; i++) if (prf[i] <= prf[i-1]) return;
+    // and now we have ourselves a genuine solution, not yet properly ordered
 #ifdef ATOMIC
     u32 soli = std::atomic_fetch_add_explicit(&nsols, 1U, std::memory_order_relaxed);
 #else
     u32 soli = nsols++;
 #endif
+    // retrieve solution indices in correct order
     if (soli < MAXSOLS) listindices1(WK, t, sols[soli], 0); // assume WK odd
   }
 #endif
+  // show bucket stats and, if desired, size distribution
   void showbsizes(u32 r) {
     printf(" b%d h%d\n", bfull, hfull);
     bfull = hfull = 0;
 #if defined(HIST) || defined(SPARK) || defined(LOGSPARK)
+    // group bucket sizes in 64 bins, from empty to full (ignoring SAVEMEM)
     u32 binsizes[65];
     memset(binsizes, 0, 65 * sizeof(u32));
     for (u32 bucketid = 0; bucketid < NBUCKETS; bucketid++) {
@@ -444,10 +458,10 @@ struct equi {
       binsizes[bsize]++;
     }
     for (u32 i=0; i < 65; i++) {
-#ifdef HIST
+#ifdef HIST  // exact counts are useful for debugging
       printf(" %d:%d", i, binsizes[i]);
 #else
-#ifdef SPARK
+#ifdef SPARK // everybody loves sparklines
       u32 sparks = binsizes[i] / SPARKSCALE;
 #else
       u32 sparks = 0;
@@ -462,6 +476,8 @@ struct equi {
     printf("Digit %d", r+1);
   }
 
+  // thread-local object that precomputes various slot metrics for each round
+  // facilitating access to various bits in the variable size slots
   struct htlayout {
     htalloc hta;
     u32 prevhtunits;
@@ -470,16 +486,17 @@ struct equi {
     u32 prevbo;
   
     htlayout(equi *eq, u32 r): hta(eq->hta), prevhtunits(0), dunits(0) {
-      u32 nexthashbytes = hashsize(r);
-      nexthtunits = hashwords(nexthashbytes);
-      prevbo = 0;
-      if (r) {
+      u32 nexthashbytes = hashsize(r);        // number of bytes occupied by round r hash
+      nexthtunits = hashwords(nexthashbytes); // number of 32bit words taken up by those bytes
+      prevbo = 0;                  // byte offset for accessing hash form previous round
+      if (r) {     // similar measure for previous round
         u32 prevhashbytes = hashsize(r-1);
         prevhtunits = hashwords(prevhashbytes);
         prevbo = prevhtunits * sizeof(htunit) - prevhashbytes; // 0-3
-        dunits = prevhtunits - nexthtunits;
+        dunits = prevhtunits - nexthtunits; // number of words by which hash shrinks
       }
     }
+    // extract remaining bits in digit slots in same bucket still need to collide on
     u32 getxhash0(const htunit* slot) const {
 #if WN == 200 && RESTBITS == 4
       return slot->bytes[prevbo] >> 4;
@@ -491,6 +508,7 @@ struct equi {
 #error non implemented
 #endif
     }
+    // similar but accounting for possible change in hashsize modulo 4 bits
     u32 getxhash1(const htunit* slot) const {
 #if WN == 200 && RESTBITS == 4
       return slot->bytes[prevbo] & 0xf;
@@ -502,12 +520,19 @@ struct equi {
 #error non implemented
 #endif
     }
+    // test whether two hashes match in last 32 bits
     bool equal(const htunit *hash0, const htunit *hash1) const {
       return hash0[prevhtunits-1].word == hash1[prevhtunits-1].word;
     }
   };
 
+  // this thread-local object performs in-bucket collissions
+  // by linking together slots that have identical rest bits
+  // (which is in essense a 2nd stage bucket sort)
   struct collisiondata {
+// the bitmap is an early experiment in a bitmap encoding
+// that works only for at most 64 slots
+// it might as well be obsoleted as it performs worse even in that case
 #ifdef XBITMAP
 #if NSLOTS > 64
 #error cant use XBITMAP with more than 64 slots
@@ -515,6 +540,10 @@ struct equi {
     u64 xhashmap[NRESTS];
     u64 xmap;
 #else
+// This maintains NRESTS = 2^RESTBITS lists whose starting slot
+// are in xhashslots[] and where subsequent slots in each list
+// are found through nextxhashslot[]
+// since 0 is already a valid slot number, use ~0 as nil value
 #if RESTBITS <= 6
     typedef uchar xslot;
 #else
