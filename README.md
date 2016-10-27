@@ -51,10 +51,10 @@ More detailed documentation is available in the equi_miner.h source code.
 
 Performance summary:
 
-equi1:      4.6 Sol/s - 5.9 Sol/s (with AVX2)
-equi -t 8: 16.7 Sol/s
-8 x equi1: 20.3 Sol/s
-dev1:       6.5 Sol/s (xenoncat's blake)
-8 x dev1:  20.6 Sol/s
-dev -t 8:  17.2 Sol/s
-eqcuda:    23.6 Sol/s
+- equi1:      4.6 Sol/s - 5.9 Sol/s (with AVX2)
+- equi -t 8: 16.7 Sol/s
+- 8 x equi1: 20.3 Sol/s
+- dev1:       6.5 Sol/s (xenoncat's blake)
+- 8 x dev1:  20.6 Sol/s
+- dev -t 8:  17.2 Sol/s
+- eqcuda:    23.6 Sol/s
