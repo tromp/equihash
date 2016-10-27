@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
 #ifdef USE_AVX2
   printf(" and AVX2 intrinsics to compute 4-way blake2b\n");
 #else
-  printf("; no AVX2 detected\n");
+  printf(" and no AVX2\n");
 #endif
   u32 sumnsols = 0;
   char headernonce[HEADERNONCELEN];

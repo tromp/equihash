@@ -36,7 +36,7 @@ reducing waste by about 7%. My solver now needs only 144MB compared to xenoncat'
 
 Seeing that my solver was spending 45% of runtime on hashing, I asked xenoncat if (s)he
 could make their assembly blake2b implementation available through a C binding, which s(he)
-very generously did.
+very generously did. My solver executables using this are called dev1/dev.
 
 Zooko had earlier suggested looking at Samuel Neves' blake2bp implemention for faster hashing.
 After initially rejecting this approach due to different blake2bp semantics, I came back to 
@@ -53,10 +53,13 @@ Performance summary (on 4GHz i7-4790K and NVidia GTX980):
 
 - equi1:        4.6 Sol/s
 - eqavx21:      5.9 Sol/s
-- equi -t 8:    4.6 Sol/s
-- eqavx2 -t 8:  TBA Sol/s
-- 8 x equi1:   20.3 Sol/s
-- dev1:         6.5 Sol/s (xenoncat's blake)
-- 8 x dev1:    20.6 Sol/s
+- dev1:         6.5 Sol/s
+
+- equi -t 8:   13.7 Sol/s
+- eqavx2 -t 8: 16.7 Sol/s
 - dev -t 8:    17.2 Sol/s
+
+- 8 x eqavx21: 20.3 Sol/s
+- 8 x dev1:    20.6 Sol/s
+
 - eqcuda:      23.6 Sol/s
