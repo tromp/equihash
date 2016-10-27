@@ -564,7 +564,6 @@ struct equi {
     }
   };
 
-#undef __AVX2__
 #ifdef __AVX2__
 static const u32 BLAKESINPARALLEL = 4;
 #else
@@ -591,7 +590,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 #endif
       for (u32 i = 0; i<BLAKESINPARALLEL; i++) {
         for (u32 j = 0; j<HASHESPERBLAKE; j++) {
-          const uchar *ph = hashes+ i * 64 + j * WN/8;
+          const uchar *ph = hashes + i * 64 + j * WN/8;
 #if BUCKBITS == 12 && RESTBITS == 8
           const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
 #elif BUCKBITS == 16 && RESTBITS == 4
