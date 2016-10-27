@@ -13,8 +13,8 @@ equi1:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
 equi1g:	equi.h equi_miner.h equi_miner.cpp Makefile
 	g++ -g -std=c++11 -DLOGSPARK -DSPARKSCALE=11 equi_miner.cpp blake/blake2b.cpp -pthread -o equi1g
 
-equi1445:	equi.h equi_miner.h equi_miner.cpp Makefile
-	$(GPP) -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp -o equi1445
+equi1445:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
+	$(GPP) -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equi1445
 
 dev:	equi.h dev_miner.h dev_miner.cpp blake2b/asm/zcblake2_avx2.o Makefile
 	$(GPP) -DATOMIC dev_miner.cpp blake/blake2b.cpp blake2b/asm/zcblake2_avx2.o -o dev
