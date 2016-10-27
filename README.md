@@ -8,6 +8,53 @@ only suitable for single-threaded use (where they get some speedup over the gene
 
 Options -h HEADER -n NONCE are self explanatory.
 Add option -r RANGESIZE to search a range of nonces.
+For benching, options -n 255 -r 100 are useful as it gets exactly 188 solutions from 100 runs.
 
-Build the faster version courtesy of xenoncat's AVX2 4-way parallel blake2b assembly code with
-"make dev1" and bench with "time ./dev1 -n 255 -r 100"
+My original submission was triggered by seeing how xenoncat's
+"has much of the same ideas as mine" so that making my open sourcing conditional
+on getting sufficient funding for the Cuckoo Cycle Bounty Fund no longer made sense.
+
+https://forum.z.cash/t/tromps-solvers/2465/76
+
+I noticed that we both use bucket sorting with tree nodes stored as a directed acyclic graph.
+Upon original submission, I wrote: Compared to xenoncat, my solver differs in
+- having way more buckets,
+- wasting some memory,
+- having simpler pair compression,
+- being multi-threaded,
+- and supporting (144,5).
+- And of course in not using any assembly.
+- Oh, and having some cool visualization of bucket size distribution...
+
+David Jaenson gave me the idea to disable atomics for single threaded operation,
+which gave a nice speed boost for that case.
+
+Since then I reduced the number of buckets in the cpu solver from 2^16 to 2^12,
+which allowed for reducing the bucket space overhead. I borrowed from xenoncat
+the idea to allocate all memory statically, and found a way to improve upon his memory layout,
+reducing waste by about 7%.
+
+Seeing that my solver was spending 45% of runtime on hashing, I asked xenoncat if (s)he
+could make their assembly blake2b implementation available through a C binding, which s(he)
+very generously did.
+
+Zooko had earlier suggested looking at Samuel Neves' blake2bp implemention for faster hashing.
+After initially rejecting this approach due to different blake2bp semantics, I came back to 
+to it in search of a more portable way to gain speed. I managed to bridge the semantic gap
+and modify Samuel's source to serve Equihash's purposes.
+
+On the morning of the submission deadline day, discussion on sorting with judge Solardiz
+made me realize that my 2nd stage bucket sort could benefit from linking rather than listing
+xor-able slots, which gave me the final speed boost.
+
+More detailed documentation is available in the equi_miner.h source code.
+
+Performance summary:
+
+equi1:      4.6 Sol/s - 5.9 Sol/s (with AVX2)
+equi -t 8: 16.7 Sol/s
+8 x equi1: 20.3 Sol/s
+dev1:       6.5 Sol/s (xenoncat's blake)
+8 x dev1:  20.6 Sol/s
+dev -t 8:  17.2 Sol/s
+eqcuda:    23.6 Sol/s
