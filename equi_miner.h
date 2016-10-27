@@ -380,11 +380,11 @@ struct equi {
 #endif
     if (soli < MAXSOLS) listindices1(WK, t, sols[soli], 0);
   }
-// this is a differrent way to recognize most (but not all) dupes
-// unlike MERGESORT it doesn't end up sorting the indices,
-// but the few remaining candidates can easily
-// affort to have a qsort applied to them in order to find remaining dupes
 #else
+  // this is a differrent way to recognize most (but not all) dupes
+  // unlike MERGESORT it doesn't end up sorting the indices,
+  // but the few remaining candidates can easily
+  // affort to have a qsort applied to them in order to find remaining dupes
   bool orderindices(u32 *indices, u32 size) {
     if (indices[0] > indices[size]) {
       for (u32 i=0; i < size; i++) {
@@ -526,13 +526,13 @@ struct equi {
     }
   };
 
-  // this thread-local object performs in-bucket collissions
+  // this thread-local object performs in-bucket collisions
   // by linking together slots that have identical rest bits
   // (which is in essense a 2nd stage bucket sort)
   struct collisiondata {
-// the bitmap is an early experiment in a bitmap encoding
-// that works only for at most 64 slots
-// it might as well be obsoleted as it performs worse even in that case
+    // the bitmap is an early experiment in a bitmap encoding
+    // that works only for at most 64 slots
+    // it might as well be obsoleted as it performs worse even in that case
 #ifdef XBITMAP
 #if NSLOTS > 64
 #error cant use XBITMAP with more than 64 slots
@@ -540,10 +540,10 @@ struct equi {
     u64 xhashmap[NRESTS];
     u64 xmap;
 #else
-// This maintains NRESTS = 2^RESTBITS lists whose starting slot
-// are in xhashslots[] and where subsequent slots in each list
-// are found through nextxhashslot[]
-// since 0 is already a valid slot number, use ~0 as nil value
+    // This maintains NRESTS = 2^RESTBITS lists whose starting slot
+    // are in xhashslots[] and where subsequent (next-lower-numbered)
+    // slots in each list are found through nextxhashslot[]
+    // since 0 is already a valid slot number, use ~0 as nil value
 #if RESTBITS <= 6
     typedef uchar xslot;
 #else
@@ -607,12 +607,12 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
     htlayout htl(this, 0);
     const u32 hashbytes = hashsize(0);
     uchar hashes[BLAKESINPARALLEL * 64];
-    blake2b_state state0 = blake_ctx;
+    blake2b_state state0 = blake_ctx;  // local copy on stack can be copied faster
     for (u32 block = id; block < NBLOCKS; block += nthreads) {
 #ifdef USE_AVX2
       blake2bip_final(&state0, hashes, block);
 #else
-      blake2b_state state = state0;
+      blake2b_state state = state0;  // make another copy since blake2b_final modifies it
       u32 leb = htole32(block);
       blake2b_update(&state, (uchar *)&leb, sizeof(u32));
       blake2b_final(&state, hashes, HASHOUT);
@@ -620,25 +620,27 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
       for (u32 i = 0; i<BLAKESINPARALLEL; i++) {
         for (u32 j = 0; j<HASHESPERBLAKE; j++) {
           const uchar *ph = hashes + i * 64 + j * WN/8;
+          // figure out bucket for this hash by extracting leading BUCKBITS bits
 #if BUCKBITS == 12 && RESTBITS == 8
           const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
 #elif BUCKBITS == 16 && RESTBITS == 4
           const u32 bucketid = ((u32)ph[0] << 8) | ph[1];
 #elif BUCKBITS == 20 && RESTBITS == 4
           const u32 bucketid = ((((u32)ph[0] << 8) | ph[1]) << 4) | ph[2] >> 4;
-#elif BUCKBITS == 12 && RESTBITS == 4
-          const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
-          const u32 xhash = ph[1] & 0xf;
 #else
 #error not implemented
 #endif
+          // grab next available slot in that bucket
           const u32 slot = getslot0(bucketid);
           if (slot >= NSLOTS) {
-            bfull++;
+            bfull++; // this actually never seems to happen in round 0 due to uniformity
             continue;
           }
+          // location for slot's tag
           htunit *s = hta.heap0[bucketid][slot] + htl.nexthtunits;
+          // hash should end right before tag
           memcpy(s->bytes-hashbytes, ph+WN/8-hashbytes, hashbytes);
+          // round 0 tags store hash-generating index
           s->tag = tree((block * BLAKESINPARALLEL + i) * HASHESPERBLAKE + j);
         }
       }
@@ -648,21 +650,22 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
   void digitodd(const u32 r, const u32 id) {
     htlayout htl(this, r);
     collisiondata cd;
+    // threads process buckets in round-robin fashion
     for (u32 bucketid=id; bucketid < NBUCKETS; bucketid += nthreads) {
-      cd.clear();
-      slot0 *buck = htl.hta.heap0[bucketid];
-      u32 bsize   = getnslots0(bucketid);
-      for (u32 s1 = 0; s1 < bsize; s1++) {
+      cd.clear(); // could have made this the constructor, and declare here
+      slot0 *buck = htl.hta.heap0[bucketid]; // point to first slot of this bucket
+      u32 bsize   = getnslots0(bucketid);    // grab and reset bucket size
+      for (u32 s1 = 0; s1 < bsize; s1++) {   // loop over slots
         const htunit *slot1 = buck[s1];
-        cd.addslot(s1, htl.getxhash0(slot1));
+        cd.addslot(s1, htl.getxhash0(slot1));// identify list of previous colliding slots 
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
-          if (htl.equal(slot0, slot1)) {
-            hfull++;
+          if (htl.equal(slot0, slot1)) {     // expect difference in last 32 bits unless duped
+            hfull++;                         // record discarding
             continue;
           }
-          u32 xorbucketid;
+          u32 xorbucketid;                   // determine bucket for s0 xor s1
           const uchar *bytes0 = slot0->bytes, *bytes1 = slot1->bytes;
 #if WN == 200 && BUCKBITS == 12 && RESTBITS == 8
           xorbucketid = (((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) & 0xf) << 8)
@@ -677,14 +680,18 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 #else
 #error not implemented
 #endif
+          // grab next available slot in that bucket
           const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
-            bfull++;
+            bfull++;    // SAVEMEM determines how often this happens
             continue;
           }
+          // start of slot for s0 ^ s1
           htunit *xs = htl.hta.heap1[xorbucketid][xorslot];
+          // store xor of hashes possibly minus initial 0 word due to collision
           for (u32 i=htl.dunits; i < htl.prevhtunits; i++)
             xs++->word = slot0[i].word ^ slot1[i].word;
+          // store tree node right after hash
           xs->tag = tree(bucketid, s0, s1);
         }
       }
@@ -737,6 +744,9 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
     }
   }
   
+  // functions digit1 through digit9 are unrolled versions specific to the
+  // (N=200,K=9) parameters with 8 RESTBITS
+  // and will be used with compile option -DUNROLL
   void digit1(const u32 id) {
     htalloc heaps = hta;
     collisiondata cd;
@@ -997,6 +1007,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
     }
   }
   
+  // final round looks simpler
   void digitK(const u32 id) {
     collisiondata cd;
     htlayout htl(this, WK);
@@ -1010,14 +1021,14 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
         cd.addslot(s1, htl.getxhash0(slot1)); // assume WK odd
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          if (htl.equal(buck[s0], slot1)) { // EASY OPTIMIZE
-            candidate(tree(bucketid, s0, s1));
+          if (htl.equal(buck[s0], slot1)) {    // there is only 1 word of hash left
+            candidate(tree(bucketid, s0, s1)); // so a match gives a solution candidate
             nc++;
           }
         }
       }
     }
-    // printf(" %d candidates ", nc);
+    // printf(" %d candidates ", nc);  // this gets uncommented a lot for debugging
   }
 };
 
@@ -1035,6 +1046,7 @@ void barrier(pthread_barrier_t *barry) {
   }
 }
 
+// do all rounds for each thread
 void *worker(void *vp) {
   thread_ctx *tp = (thread_ctx *)vp;
   equi *eq = tp->eq;
