@@ -927,7 +927,7 @@ struct equi {
         }
       }
     }
-    printf(" %d candidates ", nc);
+    // printf(" %d candidates ", nc);
   }
 };
 

@@ -38,8 +38,6 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 // number of buckets
 static const u32 NBUCKETS = 1<<BUCKBITS;
-// bucket mask
-static const u32 BUCKMASK = NBUCKETS-1;
 // 2_log of number of slots per bucket
 static const u32 SLOTBITS = RESTBITS+1+1;
 static const u32 SLOTRANGE = 1<<SLOTBITS;
@@ -67,10 +65,11 @@ struct tree {
   __device__ tree(const u32 idx) {
     bid_s0_s1_x = idx;
   }
-  __device__ tree(const u32 bid, const u32 s0, const u32 s1, const u32 xh) {
 #ifdef XINTREE
+  __device__ tree(const u32 bid, const u32 s0, const u32 s1, const u32 xh) {
   bid_s0_s1_x = ((((bid << SLOTBITS) | s0) << SLOTBITS) | s1) << RESTBITS | xh;
 #else
+  __device__ tree(const u32 bid, const u32 s0, const u32 s1) {
   bid_s0_s1_x = (((bid << SLOTBITS) | s0) << SLOTBITS) | s1;
 #endif
   }
@@ -240,6 +239,8 @@ struct equi {
     listindices4(buck[t.slotid1()].attr, indices+size);
     orderindices(indices, size);
   }
+
+#if WK == 9
   __device__ void listindices6(const tree t, u32 *indices) {
     const bucket1 &buck = hta.trees1[2][t.bucketid()];
     const u32 size = 1 << 5;
@@ -268,6 +269,7 @@ struct equi {
     listindices8(buck[t.slotid1()].attr, indices+size);
     orderindices(indices, size);
   }
+#endif
   __device__ void candidate(const tree t) {
     proof prf;
 #if WK==9
@@ -564,12 +566,11 @@ __global__ void digitE(equi *eq, const u32 r) {
         if (htl.equal(pslot0->hash, pslot1->hash))
           continue;
         u32 xorbucketid;
-        u32 xhash;
         const uchar *bytes0 = pslot0->hash->bytes, *bytes1 = pslot1->hash->bytes;
 #if WN == 200 && BUCKBITS == 16 && RESTBITS == 4 && defined(XINTREE)
         xorbucketid = ((u32)(bytes0[htl.prevbo] ^ bytes1[htl.prevbo]) << 8)
                         | (bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]);
-                  xhash = (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
+        u32 xhash = (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
 #elif WN == 144 && BUCKBITS == 20 && RESTBITS == 4
         xorbucketid = ((((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 8)
                             | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2])) << 4)
@@ -600,6 +601,9 @@ __global__ void digitE(equi *eq, const u32 r) {
 }
 
 #ifdef UNROLL
+// bucket mask
+static const u32 BUCKMASK = NBUCKETS-1;
+
 __global__ void digit_1(equi *eq) {
   equi::htlayout htl(eq, 1);
   equi::collisiondata cd;

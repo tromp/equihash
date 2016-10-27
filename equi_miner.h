@@ -988,7 +988,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
         }
       }
     }
-    printf(" %d candidates ", nc);
+    // printf(" %d candidates ", nc);
   }
 };
 
