@@ -523,9 +523,6 @@ struct equi {
 #endif
     uchar hashes[BLAKESINPARALLEL * 64];
     blake2b_state state = blake_ctx;
-    state->counter += state->buflen;
-    state->lastblock = 1;
-    memset(state->buf+state->buflen, 0, BLAKE2B_BLOCKBYTES-state->buflen); // Padding
     for (u32 block = id; block < NBLOCKS; block += nthreads) {
       blake2bip_final(&state, hashes, block);
 #ifndef HASHONLY

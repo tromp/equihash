@@ -28,7 +28,7 @@ hash1:	equi.h dev_miner.h dev_miner.cpp blake2b/asm/zcblake2_avx2.o Makefile
 equidev:	equi.h equi_dev_miner.h equi_dev_miner.cpp Makefile
 	$(GPP) -DATOMIC equi_dev_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equidev
 
-equidev1:	equi.h equi_dev_miner.h equi_dev_miner.cpp Makefile
+equidev1:	equi.h equi_dev_miner.h equi_dev_miner.cpp blake2-avx2/blake2bip.c Makefile 
 	$(GPP) equi_dev_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equidev1
 
 eqcuda:	equi_miner.cu equi.h blake2b.cu Makefile
