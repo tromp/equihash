@@ -49,7 +49,7 @@ xor-able slots, which gave me the final speed boost.
 
 More detailed documentation is available in the equi_miner.h source code.
 
-Performance summary:
+Performance summary (on 4GHz i7-4790K and NVidia GTX980):
 
 - equi1:      4.6 Sol/s - 5.9 Sol/s (with AVX2)
 - equi -t 8: 16.7 Sol/s
