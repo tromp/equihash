@@ -101,8 +101,6 @@ static const u32 SLOTRANGE = 1<<SLOTBITS;
 static const u32 SLOTMSB = 1<<(SLOTBITS-1);
 // number of slots per bucket
 static const u32 NSLOTS = SLOTRANGE * SAVEMEM;
-// number of per-xhash slots
-static const u32 XFULL = 16;
 // SLOTBITS mask
 static const u32 SLOTMASK = SLOTRANGE-1;
 // number of possible values of xhash (rest of n) bits
@@ -239,7 +237,6 @@ struct equi {
   proof *sols;
   au32 nsols;
   u32 nthreads;
-  u32 xfull;
   u32 bfull;
   u32 hfull;
   pthread_barrier_t barry;
@@ -266,7 +263,7 @@ struct equi {
     Blake2PrepareMidstate4(midstate, alignheader);
     memcpy(&blake_ctx, midstate, 256);
     memset(nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
-    nsols = xfull = bfull = hfull = 0;
+    nsols = bfull = hfull = 0;
   }
   u32 getslot0(const u32 bucketi) {
 #ifdef ATOMIC
@@ -405,8 +402,8 @@ struct equi {
   }
 #endif
   void showbsizes(u32 r) {
-    printf(" x%d b%d h%d\n", xfull, bfull, hfull);
-    xfull = bfull = hfull = 0;
+    printf(" b%d h%d\n", bfull, hfull);
+    bfull = hfull = 0;
 #if defined(HIST) || defined(SPARK) || defined(LOGSPARK)
     u32 binsizes[65];
     memset(binsizes, 0, 65 * sizeof(u32));
@@ -491,11 +488,10 @@ struct equi {
 #else
     typedef u16 xslot;
 #endif
-    xslot nxhashslots[NRESTS];
-    xslot xhashslots[NRESTS][XFULL];
-    xslot *xx;
-    u32 n0;
-    u32 n1;
+    static const xslot xnil = ~0;
+    xslot xhashslots[NRESTS];
+    xslot nextxhashslot[NSLOTS];
+    xslot nextslot;
 #endif
     u32 s0;
 
@@ -503,40 +499,36 @@ struct equi {
 #ifdef XBITMAP
       memset(xhashmap, 0, NRESTS * sizeof(u64));
 #else
-      memset(nxhashslots, 0, NRESTS * sizeof(xslot));
+      memset(xhashslots, xnil, NRESTS * sizeof(xslot));
+      memset(nextxhashslot, xnil, NSLOTS * sizeof(xslot));
 #endif
     }
-    bool addslot(u32 s1, u32 xh) {
+    void addslot(u32 s1, u32 xh) {
 #ifdef XBITMAP
       xmap = xhashmap[xh];
       xhashmap[xh] |= (u64)1 << s1;
       s0 = -1;
-      return true;
 #else
-      n1 = (u32)nxhashslots[xh]++;
-      if (n1 >= XFULL)
-        return false;
-      xx = xhashslots[xh];
-      xx[n1] = s1;
-      n0 = 0;
-      return true;
+      nextslot = xhashslots[xh];
+      nextxhashslot[s1] = nextslot;
+      xhashslots[xh] = s1;
 #endif
     }
     bool nextcollision() const {
 #ifdef XBITMAP
       return xmap != 0;
 #else
-      return n0 < n1;
+      return nextslot != xnil;
 #endif
     }
     u32 slot() {
 #ifdef XBITMAP
       const u32 ffs = __builtin_ffsll(xmap);
       s0 += ffs; xmap >>= ffs;
-      return s0;
 #else
-      return (u32)xx[n0++];
+      nextslot = nextxhashslot[s0 = nextslot];
 #endif
+      return s0;
     }
   };
 
@@ -578,10 +570,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htl.getxhash0(slot1))) {
-          xfull++;
-          continue;
-        }
+        cd.addslot(s1, htl.getxhash0(slot1));
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
@@ -627,10 +616,7 @@ struct equi {
       u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htl.getxhash1(slot1))) {
-          xfull++;
-          continue;
-        }
+        cd.addslot(s1, htl.getxhash1(slot1));
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
@@ -676,10 +662,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htobe32(slot1->word) >> 20 & 0xff)) {
-          xfull++;
-          continue;
-        }
+        cd.addslot(s1, htobe32(slot1->word) >> 20 & 0xff);
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
@@ -712,10 +695,7 @@ struct equi {
       u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, slot1->bytes[3])) {
-          xfull++;
-          continue;
-        }
+        cd.addslot(s1, slot1->bytes[3]);
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
@@ -748,10 +728,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htobe32(slot1->word) >> 12 & 0xff)) {
-          xfull++;
-          continue;
-        }
+        cd.addslot(s1, htobe32(slot1->word) >> 12 & 0xff);
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
@@ -783,10 +760,7 @@ struct equi {
       u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, slot1->bytes[0])) {
-          xfull++;
-          continue;
-        }
+        cd.addslot(s1, slot1->bytes[0]);
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
@@ -818,10 +792,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htobe32(slot1->word) >> 4 & 0xff)) {
-          xfull++;
-          continue;
-        }
+        cd.addslot(s1, htobe32(slot1->word) >> 4 & 0xff);
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
@@ -855,10 +826,7 @@ struct equi {
       u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, slot1->bytes[1])) {
-          xfull++;
-          continue;
-        }
+        cd.addslot(s1, slot1->bytes[1]);
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
@@ -890,10 +858,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, (slot1->bytes[3] & 0xf) << 4 | slot1->bytes[4] >> 4)) {
-          xfull++;
-          continue;
-        }
+        cd.addslot(s1, (slot1->bytes[3] & 0xf) << 4 | slot1->bytes[4] >> 4);
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
@@ -924,10 +889,7 @@ struct equi {
       u32 bsize   = getnslots1(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, slot1->bytes[2])) {
-          xfull++;
-          continue;
-        }
+        cd.addslot(s1, slot1->bytes[2]);
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
@@ -961,8 +923,7 @@ struct equi {
       u32 bsize   = getnslots0(bucketid);
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        if (!cd.addslot(s1, htl.getxhash0(slot1))) // assume WK odd
-          continue;
+        cd.addslot(s1, htl.getxhash0(slot1)); // assume WK odd
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           if (htl.equal(buck[s0], slot1)) { // EASY OPTIMIZE

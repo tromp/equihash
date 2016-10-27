@@ -47,7 +47,12 @@ int main(int argc, char **argv) {
   thread_ctx *threads = (thread_ctx *)calloc(nthreads, sizeof(thread_ctx));
   assert(threads);
   equi eq(nthreads);
-  printf("Using %dMB of memory\n", 1 + eq.hta.alloced / 0x100000);
+  printf("Using %dMB of memory", 1 + eq.hta.alloced / 0x100000);
+#ifdef __AVX2__ 
+  printf(" and AVX2 intrinsics to compute 4-way blake2b\n");
+#else
+  printf("; no AVX2 detected\n");
+#endif
   u32 sumnsols = 0;
   char headernonce[HEADERNONCELEN];
   u32 hdrlen = strlen(header);

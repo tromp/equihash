@@ -4,11 +4,11 @@ GPP   = g++ -march=native -m64 -std=c++11 $(FLAGS)
 
 all:	equi equi1 verify test spark test1445
 
-equi:	equi.h equi_miner.h equi_miner.cpp Makefile
-	$(GPP) -DATOMIC -DUNROLL equi_miner.cpp blake/blake2b.cpp -o equi
+equi:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
+	$(GPP) -DATOMIC -DUNROLL equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equi
 
-equi1:	equi.h equi_miner.h equi_miner.cpp Makefile
-	$(GPP) -DUNROLL equi_miner.cpp blake/blake2b.cpp -o equi1
+equi1:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
+	$(GPP) -DUNROLL equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equi1
 
 equi1g:	equi.h equi_miner.h equi_miner.cpp Makefile
 	g++ -g -std=c++11 -DLOGSPARK -DSPARKSCALE=11 equi_miner.cpp blake/blake2b.cpp -pthread -o equi1g

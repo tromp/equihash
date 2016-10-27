@@ -298,32 +298,23 @@ ALIGN(64) static const uint32_t indices[12][16] = {
 } while(0)
 
 void blake2bip_final(const blake2b_state *S, uchar *out, u32 blockidx) {
-  __m256i v[16], s[8], iv[8], w[16];                             // 16 * 32, 8 * 32
-  union {
-    __m256i  v;
-    uint64_t w[4];
-  } counter;
-  uint32_t b;
-  size_t inlen;
-  int i, r;
+  __m256i v[16], s[8], iv[8], w[16], counter, flag;
+  uint32_t b, i, r;
 
   ALIGN(64) uint8_t buffer[4 * BLAKE2B_BLOCKBYTES]; // 4 * 128
-  memset(buffer, 0, 4 * BLAKE2B_BLOCKBYTES); // zero whole buffer
+  memset(buffer, 0, 4 * BLAKE2B_BLOCKBYTES);
   for (i = 0; i < 4; i++) {
     memcpy(buffer+128*i, S->buf, S->buflen);
     b = htole32(4 * blockidx + i);
     memcpy(buffer+128*i + S->buflen, &b, 4);
   }
-  inlen = S->buflen + 4;
 
   for(i = 0; i < 8; ++i) {
-    v[i] = _mm256_set1_epi64x(S->h[i]);       // initialize all 256/64 = 4 lanes
+    v[i] = _mm256_set1_epi64x(S->h[i]);
   }
 
-  __m256i x4 = _mm256_set1_epi64x(128+inlen);
-  __m256i f0 = _mm256_set1_epi64x(~0);
-
-  counter.v  = _mm256_add_epi64(counter.v, x4);
+  counter = _mm256_set1_epi64x(128 + S->buflen + 4);
+  flag    = _mm256_set1_epi64x(~0);
 
   for(i = 0; i < 8; ++i) {
     iv[i] = v[i];
@@ -332,9 +323,9 @@ void blake2bip_final(const blake2b_state *S, uchar *out, u32 blockidx) {
   v[ 9] = _mm256_set1_epi64x(blake2b_IV[1]);
   v[10] = _mm256_set1_epi64x(blake2b_IV[2]);
   v[11] = _mm256_set1_epi64x(blake2b_IV[3]);
-  v[12] = XOR(_mm256_set1_epi64x(blake2b_IV[4]), counter.v);
+  v[12] = XOR(_mm256_set1_epi64x(blake2b_IV[4]), counter);
   v[13] = _mm256_set1_epi64x(blake2b_IV[5]);
-  v[14] = XOR(_mm256_set1_epi64x(blake2b_IV[6]), f0);
+  v[14] = XOR(_mm256_set1_epi64x(blake2b_IV[6]), flag);
   v[15] = _mm256_set1_epi64x(blake2b_IV[7]);
   BLAKE2B_LOADMSG_V4(w, buffer);
   for(r = 0; r < 12; ++r) {
@@ -346,7 +337,5 @@ void blake2bip_final(const blake2b_state *S, uchar *out, u32 blockidx) {
 
   BLAKE2B_UNPACK_STATE_V4(s, v);
 
-  // big loop obsoleted as it would if(!inlen) break
-
-  memcpy(out, s, 256); // instead of return blake2b_root(out, (void *)s);
+  memcpy(out, s, 256);
 }

@@ -45,8 +45,6 @@ static const u32 SLOTBITS = RESTBITS+1+1;
 static const u32 SLOTRANGE = 1<<SLOTBITS;
 // number of slots per bucket
 static const u32 NSLOTS = SLOTRANGE * SAVEMEM;
-// number of per-xhash slots
-static const u32 XFULL = 16;
 // SLOTBITS mask
 static const u32 SLOTMASK = SLOTRANGE-1;
 // number of possible values of xhash (rest of n) bits
@@ -399,11 +397,10 @@ struct equi {
 #else
     typedef u16 xslot;
 #endif
-    xslot nxhashslots[NRESTS];
-    xslot xhashslots[NRESTS][XFULL];
-    xslot *xx;
-    u32 n0;
-    u32 n1;
+    static const xslot xnil = ~0;
+    xslot xhashslots[NRESTS];
+    xslot nextxhashslot[NSLOTS];
+    xslot nextslot;
 #endif
     u32 s0;
 
@@ -411,7 +408,8 @@ struct equi {
 #ifdef XBITMAP
       memset(xhashmap, 0, NRESTS * sizeof(u64));
 #else
-      memset(nxhashslots, 0, NRESTS * sizeof(xslot));
+      memset(xhashslots, xnil, NRESTS * sizeof(xslot));
+      memset(nextxhashslot, xnil, NSLOTS * sizeof(xslot));
 #endif
     }
     __device__ bool addslot(u32 s1, u32 xh) {
@@ -421,12 +419,9 @@ struct equi {
       s0 = ~0;
       return true;
 #else
-      n1 = (u32)nxhashslots[xh]++;
-      if (n1 >= XFULL)
-        return false;
-      xx = xhashslots[xh];
-      xx[n1] = s1;
-      n0 = 0;
+      nextslot = xhashslots[xh];
+      nextxhashslot[s1] = nextslot;
+      xhashslots[xh] = s1;
       return true;
 #endif
     }
@@ -434,17 +429,17 @@ struct equi {
 #ifdef XBITMAP
       return xmap != 0;
 #else
-      return n0 < n1;
+      return nextslot != xnil;
 #endif
     }
     __device__ u32 slot() {
 #ifdef XBITMAP
       const u32 ffs = __ffsll(xmap);
       s0 += ffs; xmap >>= ffs;
-      return s0;
 #else
-      return (u32)xx[n0++];
+      nextslot = nextxhashslot[s0 = nextslot];
 #endif
+      return s0;
     }
   };
 };

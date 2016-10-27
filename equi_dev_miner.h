@@ -70,7 +70,7 @@ typedef u32 au32;
 #define BLAKESINPARALLEL 2
 #else
 #define BLAKESINPARALLEL 1
-#endif 
+#endif
 
 // number of buckets
 static const u32 NBUCKETS = 1<<BUCKBITS;
