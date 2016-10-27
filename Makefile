@@ -19,8 +19,17 @@ eqavx21:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
 equi1g:	equi.h equi_miner.h equi_miner.cpp Makefile
 	g++ -g -std=c++11 -DLOGSPARK -DSPARKSCALE=11 equi_miner.cpp blake/blake2b.cpp -pthread -o equi1g
 
-equi1445:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
-	$(GPP) -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equi1445
+eq1445:	equi.h equi_miner.h equi_miner.cpp Makefile
+	$(GPP) -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp -o eq1445
+
+eq14451:	equi.h equi_miner.h equi_miner.cpp Makefile
+	$(GPP) -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp -o eq14451
+
+eq1445avx2:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
+	$(GPP) -DUSE_AVX2 -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o eq1445avx2
+
+eq1445avx21:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
+	$(GPP) -DUSE_AVX2 -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o eq1445avx21
 
 dev:	equi.h dev_miner.h dev_miner.cpp blake2b/asm/zcblake2_avx2.o Makefile
 	$(GPP) -DATOMIC dev_miner.cpp blake/blake2b.cpp blake2b/asm/zcblake2_avx2.o -o dev
@@ -61,8 +70,8 @@ bench:	equi1
 test:	equi1 verify Makefile
 	time ./equi1 -h "" -n 0 -t 1 -s | grep ^Sol | ./verify -h "" -n 0
 
-test1445:	equi1445 verify1445 Makefile
-	time ./equi1445 -h "" -n 0 -t 1 -s | grep ^Sol | ./verify1445 -h "" -n 0
+test1445:	eq14451 verify1445 Makefile
+	time ./eq14451 -h "" -n 0 -t 1 -s | grep ^Sol | ./verify1445 -h "" -n 0
 
 spark:	equi1g
 	time ./equi1g
@@ -74,4 +83,4 @@ blake2b/asm/zcblake2_avx2.o:
 	make -C blake2b
 
 clean:	
-	make -C blake2b clean && rm -f dev dev1 equi equi1 equi1g equi1445 eqcuda eqcuda1445 verify
+	make -C blake2b clean && rm -f dev dev1 equi equi1 eqavx2 eqavx21 equi1g eq1445 eq14451 eq1445avx2 eq1445avx21 eqcuda eqcuda1445 verify
