@@ -31,14 +31,14 @@ eq1445avx2:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
 eq1445avx21:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
 	$(GPP) -DUSE_AVX2 -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o eq1445avx21
 
-dev:	equi.h dev_miner.h dev_miner.cpp blake2b/asm/zcblake2_avx2.o Makefile
-	$(GPP) -DATOMIC dev_miner.cpp blake/blake2b.cpp blake2b/asm/zcblake2_avx2.o -o dev
+dev:	equi.h dev_miner.h dev_miner.cpp blake2-asm/asm/zcblake2_avx2.o Makefile
+	$(GPP) -DATOMIC dev_miner.cpp blake/blake2b.cpp blake2-asm/asm/zcblake2_avx2.o -o dev
 
-dev1:	equi.h dev_miner.h dev_miner.cpp blake2b/asm/zcblake2_avx2.o Makefile
-	$(GPP) dev_miner.cpp blake/blake2b.cpp blake2b/asm/zcblake2_avx2.o -o dev1
+dev1:	equi.h dev_miner.h dev_miner.cpp blake2-asm/asm/zcblake2_avx2.o Makefile
+	$(GPP) dev_miner.cpp blake/blake2b.cpp blake2-asm/asm/zcblake2_avx2.o -o dev1
 
-hash1:	equi.h dev_miner.h dev_miner.cpp blake2b/asm/zcblake2_avx2.o Makefile
-	$(GPP) -DHASHONLY dev_miner.cpp blake/blake2b.cpp blake2b/asm/zcblake2_avx2.o -o hash1
+hash1:	equi.h dev_miner.h dev_miner.cpp blake2-asm/asm/zcblake2_avx2.o Makefile
+	$(GPP) -DHASHONLY dev_miner.cpp blake/blake2b.cpp blake2-asm/asm/zcblake2_avx2.o -o hash1
 
 equidev:	equi.h equi_dev_miner.h equi_dev_miner.cpp Makefile
 	$(GPP) -DATOMIC equi_dev_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equidev
@@ -76,11 +76,11 @@ test1445:	eq14451 verify1445 Makefile
 spark:	equi1g
 	time ./equi1g
 
-blake2b/asm/zcblake2_avx1.o:
-	make -C blake2b
+blake2-asm/asm/zcblake2_avx1.o:
+	make -C blake2-asm
 
-blake2b/asm/zcblake2_avx2.o:
-	make -C blake2b
+blake2-asm/asm/zcblake2_avx2.o:
+	make -C blake2-asm
 
 clean:	
 	make -C blake2b clean && rm -f dev dev1 equi equi1 eqavx2 eqavx21 equi1g eq1445 eq14451 eq1445avx2 eq1445avx21 eqcuda eqcuda1445 verify

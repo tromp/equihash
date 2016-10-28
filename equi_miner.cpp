@@ -3,6 +3,17 @@
 
 #include "equi_miner.h"
 #include <unistd.h>
+#include "ctype.h"
+
+int hextobyte(const char * x) {
+  u32 b = 0;
+  for (int i = 0; i < 2; i++) {
+    uchar c = tolower(x[i]);
+    assert(isxdigit(c));
+    b = (b << 4) | (c - (c >= '0' && c <= '9' ? '0' : ('a' - 10)));
+  }
+  return b;
+}
 
 int main(int argc, char **argv) {
   int nthreads = 1;
@@ -10,8 +21,9 @@ int main(int argc, char **argv) {
   int range = 1;
   bool showsol = false;
   const char *header = "";
+  const char *hex = "";
   int c;
-  while ((c = getopt (argc, argv, "h:n:r:t:s")) != -1) {
+  while ((c = getopt (argc, argv, "h:n:r:t:x:s")) != -1) {
     switch (c) {
       case 'h':
         header = optarg;
@@ -28,6 +40,9 @@ int main(int argc, char **argv) {
       case 't':
         nthreads = atoi(optarg);
         break;
+      case 'x':
+        hex = optarg;
+        break;
     }
   }
 #ifndef XWITHASH
@@ -40,7 +55,7 @@ int main(int argc, char **argv) {
 #else
   assert(nthreads==1);
 #endif
-  printf("Looking for wagner-tree on (\"%s\",%d", header, nonce);
+  printf("Looking for wagner-tree on (\"%s\",%d", hex ? "0x..." : header, nonce);
   if (range > 1)
     printf("-%d", nonce+range-1);
   printf(") with %d %d-bit digits and %d threads\n", NDIGITS, DIGITBITS, nthreads);
@@ -56,8 +71,14 @@ int main(int argc, char **argv) {
   u32 sumnsols = 0;
   char headernonce[HEADERNONCELEN];
   u32 hdrlen = strlen(header);
-  memcpy(headernonce, header, hdrlen);
-  memset(headernonce+hdrlen, 0, sizeof(headernonce)-hdrlen);
+  if (*hex) {
+    assert(strlen(hex) == 2 * HEADERNONCELEN);
+    for (int i = 0; i < HEADERNONCELEN; i++)
+      headernonce[i] = hextobyte(&hex[2*i]);
+  } else {
+    memcpy(headernonce, header, hdrlen);
+    memset(headernonce+hdrlen, 0, sizeof(headernonce)-hdrlen);
+  }
   for (int r = 0; r < range; r++) {
     ((u32 *)headernonce)[32] = htole32(nonce+r);
     eq.setheadernonce(headernonce, sizeof(headernonce));
