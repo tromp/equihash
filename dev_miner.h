@@ -520,7 +520,7 @@ struct equi {
     }
   };
 
-  static const u32 #define BLAKESINPARALLEL = 4;
+  static const u32 BLAKESINPARALLEL = 4;
   // number of hashes extracted from BLAKESINPARALLEL blake2b outputs
   static const u32 HASHESPERBLOCK = BLAKESINPARALLEL*HASHESPERBLAKE;
   // number of blocks of parallel blake2b calls
