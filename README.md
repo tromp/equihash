@@ -47,6 +47,9 @@ On the morning of the submission deadline day, discussion on sorting with judge 
 made me realize that my 2nd stage bucket sort could benefit from linking rather than listing
 xor-able slots, which gave me the final speed boost.
 
+On Thursday Nov 3, user elbandi on Slack reported a bug in verify() where it allows a non-zero
+final digit in the top-level xor. That is now fixed.
+
 More detailed documentation is available in the equi_miner.h source code.
 
 Performance summary (on 4GHz i7-4790K and NVidia GTX980):
