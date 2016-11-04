@@ -67,7 +67,7 @@ void setheader(blake2b_state *ctx, const char *headernonce) {
 enum verify_code { POW_OK, POW_HEADER_LENGTH, POW_DUPLICATE, POW_OUT_OF_ORDER, POW_NONZERO_XOR };
 const char *errstr[] = { "OK", "wrong header length", "duplicate index", "indices out of order", "nonzero xor" };
 
-void genhash(blake2b_state *ctx, u32 idx, uchar *hash) {
+void genhash(const blake2b_state *ctx, u32 idx, uchar *hash) {
   blake2b_state state = *ctx;
   u32 leb = htole32(idx / HASHESPERBLAKE);
   blake2b_update(&state, (uchar *)&leb, sizeof(u32));
@@ -76,7 +76,7 @@ void genhash(blake2b_state *ctx, u32 idx, uchar *hash) {
   memcpy(hash, blakehash + (idx % HASHESPERBLAKE) * WN/8, WN/8);
 }
 
-int verifyrec(blake2b_state *ctx, u32 *indices, uchar *hash, int r) {
+int verifyrec(const blake2b_state *ctx, u32 *indices, uchar *hash, int r) {
   if (r == 0) {
     genhash(ctx, *indices, hash);
     return POW_OK;
