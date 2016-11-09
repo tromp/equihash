@@ -180,7 +180,6 @@ struct equi {
   }
   void setheadernonce(const char *headernonce, const u32 len) {
     setheader(&blake_ctx, headernonce);
-    checkCudaErrors(cudaMemset(nslots, 0, NBUCKETS * sizeof(u32)));
     nsols = 0;
   }
   __device__ u32 getnslots0(const u32 bid) {
@@ -935,6 +934,7 @@ int main(int argc, char **argv) {
       eq.hta.trees1[r/2]  = (bucket1 *)(heap1 + r/2);
 
   checkCudaErrors(cudaMalloc((void**)&eq.nslots, 2 * NBUCKETS * sizeof(u32)));
+  checkCudaErrors(cudaMemset((void*)eq.nslots, 0, 2 * NBUCKETS * sizeof(u32)));
   checkCudaErrors(cudaMalloc((void**)&eq.sols, MAXSOLS * sizeof(proof)));
 
   equi *device_eq;
