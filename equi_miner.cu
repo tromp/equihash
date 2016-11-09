@@ -414,17 +414,15 @@ struct equi {
       memset(nextxhashslot, xnil, NSLOTS * sizeof(xslot));
 #endif
     }
-    __device__ bool addslot(u32 s1, u32 xh) {
+    __device__ void addslot(u32 s1, u32 xh) {
 #ifdef XBITMAP
       xmap = xhashmap[xh];
       xhashmap[xh] |= (u64)1 << s1;
       s0 = ~0;
-      return true;
 #else
       nextslot = xhashslots[xh];
       nextxhashslot[s1] = nextslot;
       xhashslots[xh] = s1;
-      return true;
 #endif
     }
     __device__ bool nextcollision() const {
@@ -501,9 +499,7 @@ __global__ void digitO(equi *eq, const u32 r) {
     u32 bsize = eq->getnslots0(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot0 *pslot1 = buck + s1;
-      if (!cd.addslot(s1, htl.getxhash0(pslot1)))
-        continue;
-      for (; cd.nextcollision(); ) {
+      for (cd.addslot(s1, htl.getxhash0(pslot1)); cd.nextcollision(); ) {
         const u32 s0 = cd.slot();
         const slot0 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
@@ -558,9 +554,7 @@ __global__ void digitE(equi *eq, const u32 r) {
     u32 bsize = eq->getnslots1(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot1 *pslot1 = buck + s1;
-      if (!cd.addslot(s1, htl.getxhash1(pslot1)))
-        continue;
-      for (; cd.nextcollision(); ) {
+      for (cd.addslot(s1, htl.getxhash1(pslot1)); cd.nextcollision(); ) {
         const u32 s0 = cd.slot();
         const slot1 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
@@ -614,9 +608,7 @@ __global__ void digit_1(equi *eq) {
     u32 bsize = eq->getnslots0(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot0 *pslot1 = buck + s1;
-      if (!cd.addslot(s1, htl.getxhash0(pslot1)))
-        continue;
-      for (; cd.nextcollision(); ) {
+      for (cd.addslot(s1, htl.getxhash0(pslot1)); cd.nextcollision(); ) {
         const u32 s0 = cd.slot();
         const slot0 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
@@ -649,9 +641,7 @@ __global__ void digit2(equi *eq) {
     u32 bsize = eq->getnslots1(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot1 *pslot1 = buck + s1;
-      if (!cd.addslot(s1, htl.getxhash1(pslot1)))
-        continue;
-      for (; cd.nextcollision(); ) {
+      for (cd.addslot(s1, htl.getxhash1(pslot1)); cd.nextcollision(); ) {
         const u32 s0 = cd.slot();
         const slot1 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
@@ -684,9 +674,7 @@ __global__ void digit3(equi *eq) {
     u32 bsize = eq->getnslots0(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot0 *pslot1 = buck + s1;
-      if (!cd.addslot(s1, htl.getxhash0(pslot1)))
-        continue;
-      for (; cd.nextcollision(); ) {
+      for (cd.addslot(s1, htl.getxhash0(pslot1)); cd.nextcollision(); ) {
         const u32 s0 = cd.slot();
         const slot0 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
@@ -719,9 +707,7 @@ __global__ void digit4(equi *eq) {
     u32 bsize = eq->getnslots1(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot1 *pslot1 = buck + s1;
-      if (!cd.addslot(s1, htl.getxhash1(pslot1)))
-        continue;
-      for (; cd.nextcollision(); ) {
+      for (cd.addslot(s1, htl.getxhash1(pslot1)); cd.nextcollision(); ) {
         const u32 s0 = cd.slot();
         const slot1 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
@@ -753,9 +739,7 @@ __global__ void digit5(equi *eq) {
     u32 bsize = eq->getnslots0(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot0 *pslot1 = buck + s1;
-      if (!cd.addslot(s1, htl.getxhash0(pslot1)))
-        continue;
-      for (; cd.nextcollision(); ) {
+      for (cd.addslot(s1, htl.getxhash0(pslot1)); cd.nextcollision(); ) {
         const u32 s0 = cd.slot();
         const slot0 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
@@ -787,9 +771,7 @@ __global__ void digit6(equi *eq) {
     u32 bsize = eq->getnslots1(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot1 *pslot1 = buck + s1;
-      if (!cd.addslot(s1, htl.getxhash1(pslot1)))
-        continue;
-      for (; cd.nextcollision(); ) {
+      for (cd.addslot(s1, htl.getxhash1(pslot1)); cd.nextcollision(); ) {
         const u32 s0 = cd.slot();
         const slot1 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
@@ -820,9 +802,7 @@ __global__ void digit7(equi *eq) {
     u32 bsize = eq->getnslots0(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot0 *pslot1 = buck + s1;
-      if (!cd.addslot(s1, htl.getxhash0(pslot1)))
-        continue;
-      for (; cd.nextcollision(); ) {
+      for (cd.addslot(s1, htl.getxhash0(pslot1)); cd.nextcollision(); ) {
         const u32 s0 = cd.slot();
         const slot0 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
@@ -852,9 +832,7 @@ __global__ void digit8(equi *eq) {
     u32 bsize = eq->getnslots1(bucketid);
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot1 *pslot1 = buck + s1;
-      if (!cd.addslot(s1, htl.getxhash1(pslot1)))
-        continue;
-      for (; cd.nextcollision(); ) {
+      for (cd.addslot(s1, htl.getxhash1(pslot1)); cd.nextcollision(); ) {
         const u32 s0 = cd.slot();
         const slot1 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash))
@@ -886,9 +864,7 @@ __global__ void digitK(equi *eq) {
     u32 bsize = eq->getnslots0(bucketid); // assume WK odd
     for (u32 s1 = 0; s1 < bsize; s1++) {
       const slot0 *pslot1 = buck + s1;
-      if (!cd.addslot(s1, htl.getxhash0(pslot1))) // assume WK odd
-        continue;
-      for (; cd.nextcollision(); ) {
+      for (cd.addslot(s1, htl.getxhash0(pslot1)); cd.nextcollision(); ) { // assume WK odd
         const u32 s0 = cd.slot();
         const slot0 *pslot0 = buck + s0;
         if (htl.equal(pslot0->hash, pslot1->hash)) {
