@@ -287,7 +287,6 @@ struct equi {
   // prepare blake2b midstate for new run and initialize counters
   void setheadernonce(const char *headernonce, const u32 len) {
     setheader(&blake_ctx, headernonce);
-    memset(nslots, 0, NBUCKETS * sizeof(au32)); // only nslots[0] needs zeroing
     nsols = bfull = hfull = 0;
   }
   // get heap0 bucket size in threadsafe manner
@@ -1014,11 +1013,11 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
     u32 nc = 0;
     for (u32 bucketid = id; bucketid < NBUCKETS; bucketid += nthreads) {
       cd.clear();
-      slot0 *buck = htl.hta.heap0[bucketid];
-      u32 bsize   = getnslots0(bucketid);
+      slot0 *buck = htl.hta.heap0[bucketid];   // assume WK odd
+      u32 bsize   = getnslots0(bucketid);      // assume WK odd
       for (u32 s1 = 0; s1 < bsize; s1++) {
         const htunit *slot1 = buck[s1];
-        cd.addslot(s1, htl.getxhash0(slot1)); // assume WK odd
+        cd.addslot(s1, htl.getxhash0(slot1));  // assume WK odd
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           if (htl.equal(buck[s0], slot1)) {    // there is only 1 word of hash left
