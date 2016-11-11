@@ -396,52 +396,42 @@ struct equi {
   }
   // if dupes != 0, list indices in arbitrary order and return true if dupe found
   // if dupes == 0, order indices as in Wagner condition
-  bool listindices0(u32 r, const tree t, u32 *indices, u32 *dupes) {
+  bool listindices0(u32 r, const tree t, u32 *indices) {
     if (r == 0) {
       u32 idx = t.getindex();
-      if (dupes) {
-      // recognize most dupes by storing last seen index
-      // with same K least significant bits in array dupes
-        u32 bin = idx & (PROOFSIZE-1);
-        if (idx == dupes[bin]) return true;
-        dupes[bin] = idx;
-      }
       *indices = idx;
       return false;
     }
     const slot1 *buck = hta.heap1[t.bucketid()];
     const u32 size = 1 << --r;
     u32 tagi = hashwords(hashsize(r));
-    return listindices1(r, buck[t.slotid0()][tagi].tag, indices,      dupes)
-        || listindices1(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
-        || (!dupes && orderindices(indices, size));
+    return listindices1(r, buck[t.slotid0()][tagi].tag, indices)
+        || listindices1(r, buck[t.slotid1()][tagi].tag, indices+size)
+        || orderindices(indices, size) || indices[0] == indices[size];
   }
   // need separate instance for accessing (differently typed) heap1
-  bool listindices1(u32 r, const tree t, u32 *indices, u32 *dupes) {
+  bool listindices1(u32 r, const tree t, u32 *indices) {
     const slot0 *buck = hta.heap0[t.bucketid()];
     const u32 size = 1 << --r;
     u32 tagi = hashwords(hashsize(r));
-    return listindices0(r, buck[t.slotid0()][tagi].tag, indices,      dupes)
-        || listindices0(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
-        || (!dupes && orderindices(indices, size));
+    return listindices0(r, buck[t.slotid0()][tagi].tag, indices)
+        || listindices0(r, buck[t.slotid1()][tagi].tag, indices+size)
+        || orderindices(indices, size) || indices[0] == indices[size];
   }
   // check a candidate that resulted in 0 xor
   // add as solution, with proper subtree ordering, if it has unique indices
   void candidate(const tree t) {
-    proof prf, dupes;
-    memset(dupes, 0xffff, sizeof(proof));
-    if (listindices1(WK, t, prf, dupes)) return; // assume WK odd
-    // it survived the probable dupe test, now check fully
-    qsort(prf, PROOFSIZE, sizeof(u32), &compu32);
-    for (u32 i=1; i<PROOFSIZE; i++) if (prf[i] <= prf[i-1]) return;
-    // and now we have ourselves a genuine solution, not yet properly ordered
+    proof prf;
+    // listindices combines index tree reconstruction with probably dupe test
+    if (listindices1(WK, t, prf) || duped(prf)) return; // assume WK odd
+    // and now we have ourselves a genuine solution
 #ifdef ATOMIC
     u32 soli = std::atomic_fetch_add_explicit(&nsols, 1U, std::memory_order_relaxed);
 #else
     u32 soli = nsols++;
 #endif
-    // retrieve solution indices in correct order
-    if (soli < MAXSOLS) listindices1(WK, t, sols[soli], 0); // assume WK odd
+    // copy solution into final place
+    if (soli < MAXSOLS) memcpy(sols[soli], prf, sizeof(proof));
   }
 #endif
   // show bucket stats and, if desired, size distribution
@@ -609,7 +599,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
     blake2b_state state0 = blake_ctx;  // local copy on stack can be copied faster
     for (u32 block = id; block < NBLOCKS; block += nthreads) {
 #ifdef USE_AVX2
-      blake2bip_final(&state0, hashes, block);
+      blake2bx4_final(&state0, hashes, block);
 #else
       blake2b_state state = state0;  // make another copy since blake2b_final modifies it
       u32 leb = htole32(block);

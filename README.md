@@ -65,7 +65,7 @@ Performance summary (on 4GHz i7-4790K and NVidia GTX980):
 - 8 x eqavx21: 20.3 Sol/s
 - 8 x dev1:    20.6 Sol/s
 
-- eqcuda:      23.6 Sol/s
+- eqcuda:      24.7 Sol/s
 
 And now, for something completely different: (144,5) taking 2.6 GB of memory
 

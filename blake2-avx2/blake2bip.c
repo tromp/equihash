@@ -303,7 +303,7 @@ ALIGN(64) static const uint32_t indices[12][16] = {
   }                                                                     \
 } while(0)
 
-void blake2bip_final(const blake2b_state *S, uchar *out, u32 blockidx) {
+void blake2bx4_final(const blake2b_state *S, uchar *out, u32 blockidx) {
   __m256i v[16], s[8], iv[8], w[16], counter, flag;
   uint32_t b, i, r;
 
