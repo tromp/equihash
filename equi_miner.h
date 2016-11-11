@@ -394,12 +394,10 @@ struct equi {
     }
     return false;
   }
-  // if dupes != 0, list indices in arbitrary order and return true if dupe found
-  // if dupes == 0, order indices as in Wagner condition
+  // listindices combines index tree reconstruction with probably dupe test
   bool listindices0(u32 r, const tree t, u32 *indices) {
     if (r == 0) {
-      u32 idx = t.getindex();
-      *indices = idx;
+      *indices = t.getindex();
       return false;
     }
     const slot1 *buck = hta.heap1[t.bucketid()];
