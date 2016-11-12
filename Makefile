@@ -10,11 +10,14 @@ equi:	equi.h equi_miner.h equi_miner.cpp Makefile
 equi1:	equi.h equi_miner.h equi_miner.cpp Makefile
 	$(GPP) -DUNROLL equi_miner.cpp blake/blake2b.cpp -o equi1
 
-eqavx2:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
-	$(GPP) -mavx2 -DUSE_AVX2 -DATOMIC -DUNROLL equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o eqavx2
+equix4:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
+	$(GPP) -mavx2 -DNBLAKES=4 -DATOMIC -DUNROLL equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equix4
 
-eqavx21:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
-	$(GPP) -mavx2 -DUSE_AVX2 -DUNROLL equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o eqavx21
+equix41:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
+	$(GPP) -mavx2 -DNBLAKES=4 -DUNROLL equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equix41
+
+equix81:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
+	$(GPP) -mavx2 -DNBLAKES=8 -DUNROLL equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equix41
 
 equi1g:	equi.h equi_miner.h equi_miner.cpp Makefile
 	g++ -g -std=c++11 -DLOGSPARK -DSPARKSCALE=11 equi_miner.cpp blake/blake2b.cpp -pthread -o equi1g
@@ -25,11 +28,11 @@ eq1445:	equi.h equi_miner.h equi_miner.cpp Makefile
 eq14451:	equi.h equi_miner.h equi_miner.cpp Makefile
 	$(GPP) -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp -o eq14451
 
-eq1445avx2:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
-	$(GPP) -DATOMIC -mavx2 -DUSE_AVX2 -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o eq1445avx2
+eq1445x4:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
+	$(GPP) -DATOMIC -mavx2 -DNBLAKES=4 -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o eq1445x4
 
-eq1445avx21:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
-	$(GPP) -mavx2 -DUSE_AVX2 -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o eq1445avx21
+eq1445x41:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
+	$(GPP) -mavx2 -DNBLAKES=4 -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o eq1445x41
 
 dev:	equi.h dev_miner.h dev_miner.cpp blake2-asm/asm/zcblake2_avx2.o Makefile
 	$(GPP) -mavx2 -DATOMIC dev_miner.cpp blake/blake2b.cpp blake2-asm/asm/zcblake2_avx2.o -o dev
@@ -83,4 +86,4 @@ blake2-asm/asm/zcblake2_avx2.o:
 	make -C blake2-asm
 
 clean:	
-	make -C blake2b clean && rm -f dev dev1 equi equi1 eqavx2 eqavx21 equi1g eq1445 eq14451 eq1445avx2 eq1445avx21 eqcuda eqcuda1445 verify
+	make -C blake2b clean && rm -f dev dev1 equi equi1 equix4 equix41 equi1g eq1445 eq14451 eq1445x4 eq1445x41 eqcuda eqcuda1445 verify
