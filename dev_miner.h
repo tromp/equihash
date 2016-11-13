@@ -202,7 +202,7 @@ struct htalloc {
 // 6      G G 6 . 4 2 0   F F F 5 3 1
 // 7      G G 6 . 4 2 0   H H 7 5 3 1
 // 8      I 8 6 . 4 2 0   H H 7 5 3 1
-    assert(DIGITBITS >= 16); // ensures hashes shorten by 1 unit every 2 digits
+    static_assert(DIGITBITS >= 16, "needed to ensure hashes shorten by 1 unit every 2 digits");
     heap0 = (bucket0 *)alloc(NBUCKETS, sizeof(bucket0));
     heap1 = (bucket1 *)alloc(NBUCKETS, sizeof(bucket1));
   }
@@ -229,8 +229,8 @@ struct equi {
   u32 hfull;
   pthread_barrier_t barry;
   equi(const u32 n_threads) {
-    assert(sizeof(htunit) == 4);
-    assert(WK&1); // assumed in candidate() calling indices1()
+    static_assert(sizeof(htunit) == 4, "");
+    static_assert(WK&1, "K assumed odd in candidate() calling indices1()");
     nthreads = n_threads;
     const int err = pthread_barrier_init(&barry, NULL, nthreads);
     assert(!err);
