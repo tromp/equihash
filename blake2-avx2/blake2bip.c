@@ -202,6 +202,28 @@ ALIGN(64) static const uint32_t indices[12][16] = {
   BLAKE2B_G_V4(m, r, 7, v[ 3], v[ 4], v[ 9], v[14]);  \
 } while(0)
 
+#define BLAKE2B_G_V8(m, r, i, a, b, c, d, e, f, g, h) do { \
+  a = ADD(a, LOAD((uint8_t const *)(m   ) + blake2b_sigma[r][2*i+0]));  \
+  e = ADD(e, LOAD((uint8_t const *)(m+16) + blake2b_sigma[r][2*i+0]));  \
+  a = ADD(a, b); e = ADD(e, f); d = XOR(d, a); h = XOR(h, e); d = ROT32(d); h = ROT32(h); \
+  c = ADD(c, d); g = ADD(g, h); b = XOR(b, c); f = XOR(f, g); b = ROT24(b); f = ROT24(f); \
+  a = ADD(a, LOAD((uint8_t const *)(m   ) + blake2b_sigma[r][2*i+1]));  \
+  e = ADD(e, LOAD((uint8_t const *)(m+16) + blake2b_sigma[r][2*i+1]));  \
+  a = ADD(a, b); e = ADD(e, f); d = XOR(d, a); h = XOR(h, e); d = ROT16(d); h = ROT16(h); \
+  c = ADD(c, d); g = ADD(g, h); b = XOR(b, c); f = XOR(f, g); b = ROT63(b); f = ROT63(f); \
+} while(0)
+
+#define BLAKE2B_ROUND_V8(v, m, r) do {  \
+  BLAKE2B_G_V8(m, r, 0,   v[ 0], v[ 4], v[ 8], v[12],   v[16], v[20], v[24], v[28]);  \
+  BLAKE2B_G_V8(m, r, 1,   v[ 1], v[ 5], v[ 9], v[13],   v[17], v[21], v[25], v[29]);  \
+  BLAKE2B_G_V8(m, r, 2,   v[ 2], v[ 6], v[10], v[14],   v[18], v[22], v[26], v[30]);  \
+  BLAKE2B_G_V8(m, r, 3,   v[ 3], v[ 7], v[11], v[15],   v[19], v[23], v[27], v[31]);  \
+  BLAKE2B_G_V8(m, r, 4,   v[ 0], v[ 5], v[10], v[15],   v[16], v[21], v[26], v[31]);  \
+  BLAKE2B_G_V8(m, r, 5,   v[ 1], v[ 6], v[11], v[12],   v[17], v[22], v[27], v[28]);  \
+  BLAKE2B_G_V8(m, r, 6,   v[ 2], v[ 7], v[ 8], v[13],   v[18], v[23], v[24], v[29]);  \
+  BLAKE2B_G_V8(m, r, 7,   v[ 3], v[ 4], v[ 9], v[14],   v[19], v[20], v[25], v[30]);  \
+} while(0)
+
 #if defined(PERMUTE_WITH_GATHER)
 #define BLAKE2B_LOADMSG_V4(w, m) do {             \
   int i;                                          \
@@ -344,4 +366,52 @@ void blake2bx4_final(const blake2b_state *S, uchar *out, u32 blockidx) {
   BLAKE2B_UNPACK_STATE_V4(s, v);
 
   memcpy(out, s, 256);
+}
+
+void blake2bx8_final(const blake2b_state *S, uchar *out, u32 blockidx) {
+#if 0
+  blake2bx4_final(S, out,     2*blockidx);
+  blake2bx4_final(S, out+256, 2*blockidx+1);
+#else
+  __m256i v[32], s[16], iv[8], w[32], counter, flag;
+  uint32_t b, i, r;
+
+  ALIGN(64) uint8_t buffer[8 * BLAKE2B_BLOCKBYTES];
+  memset(buffer, 0, 8 * BLAKE2B_BLOCKBYTES);
+  for (i = 0; i < 8; i++) {
+    memcpy(buffer+128*i, S->buf, S->buflen);
+    b = htole32(8 * blockidx + i);
+    memcpy(buffer+128*i + S->buflen, &b, sizeof(uint32_t));
+  }
+
+  for(i = 0; i < 8; ++i) {
+    v[16+i] = v[i] = iv[i] = _mm256_set1_epi64x(S->h[i]);
+  }
+
+  counter = _mm256_set1_epi64x(128 + S->buflen + sizeof(uint32_t));
+  flag    = _mm256_set1_epi64x(~0);
+
+  v[24] = v[ 8] = _mm256_set1_epi64x(blake2b_IV[0]);
+  v[25] = v[ 9] = _mm256_set1_epi64x(blake2b_IV[1]);
+  v[26] = v[10] = _mm256_set1_epi64x(blake2b_IV[2]);
+  v[27] = v[11] = _mm256_set1_epi64x(blake2b_IV[3]);
+  v[28] = v[12] = XOR(_mm256_set1_epi64x(blake2b_IV[4]), counter);
+  v[29] = v[13] = _mm256_set1_epi64x(blake2b_IV[5]);
+  v[30] = v[14] = XOR(_mm256_set1_epi64x(blake2b_IV[6]), flag);
+  v[31] = v[15] = _mm256_set1_epi64x(blake2b_IV[7]);
+  BLAKE2B_LOADMSG_V4(w, buffer);
+  BLAKE2B_LOADMSG_V4((w+16), (buffer+512));
+  for(r = 0; r < 12; ++r) {
+    BLAKE2B_ROUND_V8(v, w, r);
+  }
+  for(i = 0; i < 8; ++i) {
+    v[   i] = XOR(XOR(v[   i], v[ 8+i]), iv[i]);
+    v[16+i] = XOR(XOR(v[16+i], v[24+i]), iv[i]);
+  }
+
+  BLAKE2B_UNPACK_STATE_V4( s   ,  v    );
+  BLAKE2B_UNPACK_STATE_V4((s+8), (v+16));
+
+  memcpy(out, s, 8*64);
+#endif
 }

@@ -347,46 +347,39 @@ struct equi {
     }
     return false;
   }
-  // if dupes != 0, list indices in arbitrary order and return true if dupe found
-  // if dupes == 0, order indices as in Wagner condition
-  bool listindices0(u32 r, const tree t, u32 *indices, u32 *dupes) {
+  // order indices as in Wagner condition,
+  // and return true if a left and right subtree have identical leftmost leaves
+  bool listindices0(u32 r, const tree t, u32 *indices) {
     if (r == 0) {
-      u32 idx = t.getindex();
-      if (dupes) {
-        u32 bin = idx & (PROOFSIZE-1);
-        if (idx == dupes[bin]) return true;
-        dupes[bin] = idx;
-      }
-      *indices = idx;
+      *indices = t.getindex();
       return false;
     }
     const slot1 *buck = hta.heap1[t.bucketid()];
     const u32 size = 1 << --r;
     u32 tagi = hashwords(hashsize(r));
-    return listindices1(r, buck[t.slotid0()][tagi].tag, indices,      dupes)
-        || listindices1(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
-        || (!dupes && orderindices(indices, size));
+    return listindices1(r, buck[t.slotid0()][tagi].tag, indices)
+        || listindices1(r, buck[t.slotid1()][tagi].tag, indices+size)
+        || orderindices(indices, size) || indices[0] == indices[size];
   }
-  bool listindices1(u32 r, const tree t, u32 *indices, u32 *dupes) {
+  bool listindices1(u32 r, const tree t, u32 *indices) {
     const slot0 *buck = hta.heap0[t.bucketid()];
     const u32 size = 1 << --r;
     u32 tagi = hashwords(hashsize(r));
-    return listindices0(r, buck[t.slotid0()][tagi].tag, indices,      dupes)
-        || listindices0(r, buck[t.slotid1()][tagi].tag, indices+size, dupes)
-        || (!dupes && orderindices(indices, size));
+    return listindices0(r, buck[t.slotid0()][tagi].tag, indices)
+        || listindices0(r, buck[t.slotid1()][tagi].tag, indices+size)
+        || orderindices(indices, size) || indices[0] == indices[size];
   }
   void candidate(const tree t) {
-    proof prf, dupes;
-    memset(dupes, 0xffff, sizeof(proof));
-    if (listindices1(WK, t, prf, dupes)) return; // assume WK odd
-    qsort(prf, PROOFSIZE, sizeof(u32), &compu32);
-    for (u32 i=1; i<PROOFSIZE; i++) if (prf[i] <= prf[i-1]) return;
+    proof prf;
+    // listindices combines index tree reconstruction with probably dupe test
+    if (listindices1(WK, t, prf) || duped(prf)) return; // assume WK odd
+    // and now we have ourselves a genuine solution
 #ifdef ATOMIC
     u32 soli = std::atomic_fetch_add_explicit(&nsols, 1U, std::memory_order_relaxed);
 #else
     u32 soli = nsols++;
 #endif
-    if (soli < MAXSOLS) listindices1(WK, t, sols[soli], 0); // assume WK odd
+    if (soli < MAXSOLS) memcpy(sols[soli], prf, sizeof(proof));
   }
 #endif
   void showbsizes(u32 r) {

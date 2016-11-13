@@ -394,12 +394,10 @@ struct equi {
     }
     return false;
   }
-  // if dupes != 0, list indices in arbitrary order and return true if dupe found
-  // if dupes == 0, order indices as in Wagner condition
+  // listindices combines index tree reconstruction with probably dupe test
   bool listindices0(u32 r, const tree t, u32 *indices) {
     if (r == 0) {
-      u32 idx = t.getindex();
-      *indices = idx;
+      *indices = t.getindex();
       return false;
     }
     const slot1 *buck = hta.heap1[t.bucketid()];
@@ -582,31 +580,34 @@ struct equi {
     }
   };
 
-#ifdef USE_AVX2
-static const u32 BLAKESINPARALLEL = 4;
-#else
-static const u32 BLAKESINPARALLEL = 1;
+#ifndef NBLAKES
+#define NBLAKES 1
 #endif
-// number of hashes extracted from BLAKESINPARALLEL blake2b outputs
-static const u32 HASHESPERBLOCK = BLAKESINPARALLEL*HASHESPERBLAKE;
+
+// number of hashes extracted from NBLAKES blake2b outputs
+static const u32 HASHESPERBLOCK = NBLAKES*HASHESPERBLAKE;
 // number of blocks of parallel blake2b calls
 static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 
   void digit0(const u32 id) {
     htlayout htl(this, 0);
     const u32 hashbytes = hashsize(0);
-    uchar hashes[BLAKESINPARALLEL * 64];
+    uchar hashes[NBLAKES * 64];
     blake2b_state state0 = blake_ctx;  // local copy on stack can be copied faster
     for (u32 block = id; block < NBLOCKS; block += nthreads) {
-#ifdef USE_AVX2
+#if NBLAKES == 4
       blake2bx4_final(&state0, hashes, block);
-#else
+#elif NBLAKES == 8
+      blake2bx8_final(&state0, hashes, block);
+#elif NBLAKES == 1
       blake2b_state state = state0;  // make another copy since blake2b_final modifies it
       u32 leb = htole32(block);
       blake2b_update(&state, (uchar *)&leb, sizeof(u32));
       blake2b_final(&state, hashes, HASHOUT);
+#else
+#error not implemented
 #endif
-      for (u32 i = 0; i<BLAKESINPARALLEL; i++) {
+      for (u32 i = 0; i<NBLAKES; i++) {
         for (u32 j = 0; j<HASHESPERBLAKE; j++) {
           const uchar *ph = hashes + i * 64 + j * WN/8;
           // figure out bucket for this hash by extracting leading BUCKBITS bits
@@ -630,7 +631,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
           // hash should end right before tag
           memcpy(s->bytes-hashbytes, ph+WN/8-hashbytes, hashbytes);
           // round 0 tags store hash-generating index
-          s->tag = tree((block * BLAKESINPARALLEL + i) * HASHESPERBLAKE + j);
+          s->tag = tree((block * NBLAKES + i) * HASHESPERBLAKE + j);
         }
       }
     }
