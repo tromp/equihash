@@ -151,6 +151,12 @@ struct tree {
     return bid_s0_s1 & SLOTMASK;
 #endif
   }
+  bool prob_disjoint(const tree other) const {
+    tree xort(bid_s0_s1 ^ other.bid_s0_s1);
+    return xort.bucketid() || (xort.slotid0() && xort.slotid1());
+    // next two tests catch much fewer cases and are therefore skipped
+    // && slotid0() != other.slotid1() && slotid1() != other.slotid0()
+  }
 };
 
 // each bucket slot occupies a variable number of hash/tree units,
@@ -945,15 +951,11 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
         cd.addslot(s1, htl.getxhash0(slot1));  // assume WK odd
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
-          if (htl.equal(buck[s0], slot1)) {    // there is only 1 word of hash left
-            const tree t0 = buck[s0][1].tag, t1 = buck[s1][1].tag;
-            if (t0.bucketid() == t1.bucketid() &&
-               (t0.slotid0() == t1.slotid0() || t0.slotid0() == t1.slotid1() ||
-                t0.slotid1() == t1.slotid0() || t0.slotid1() == t1.slotid1())) {
-            } else {
-              candidate(tree(bucketid, s0, s1)); // so a match gives a solution candidate
-              nc++;
-            }
+          const htunit *slot0 = buck[s0];
+          // there is only 1 word of hash left
+          if (htl.equal(slot0, slot1) && slot0[1].tag.prob_disjoint(slot1[1].tag)) {
+            candidate(tree(bucketid, s0, s1)); // so a match gives a solution candidate
+            nc++;
           }
         }
       }
