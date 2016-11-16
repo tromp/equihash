@@ -319,72 +319,7 @@ struct equi {
     nslot = 0;
     return n;
   }
-// this was an experiment that turned out to be a slowdown
-// one can integrate a merge sort into the index recovery
-// but due to the memcpy's it's slower at recognizing dupes
-#ifdef MERGESORT
-  // if merged != 0, mergesort indices and return true if dupe found
-  // if merged == 0, order indices as in Wagner condition
-  bool orderindices(u32 *indices, u32 size, u32 *merged) {
-    if (merged) {
-      u32 i = 0, j = 0, k;
-      for (k = 0; i<size && j<size; k++) {
-        if (indices[i] == indices[size+j]) return true;
-        merged[k] = indices[i] < indices[size+j] ? indices[i++] : indices[size+j++];
-      }
-      memcpy(merged+k, indices+i, (size-i) * sizeof(u32));
-      memcpy(indices,  merged,    (size+j) * sizeof(u32));
-      return false;
-    } else {
-      if (indices[0] > indices[size]) {
-        for (u32 i=0; i < size; i++) {
-          const u32 tmp = indices[i];
-          indices[i] = indices[size+i];
-          indices[size+i] = tmp;
-        }
-      }
-      return false;
-    }
-  }
-  // return true if dupe found
-  bool listindices0(u32 r, const tree t, u32 *indices, u32 *merged) {
-    if (r == 0) {
-      *indices = t.getindex();
-      return false;
-    }
-    const slot1 *buck = hta.heap1[t.bucketid()];
-    const u32 size = 1 << --r;
-    u32 *indices1 = indices + size;
-    u32 tagi = hashwords(hashsize(r));
-    return listindices1(r, buck[t.slotid0()][tagi].tag, indices,  merged)
-        || listindices1(r, buck[t.slotid1()][tagi].tag, indices1, merged)
-        || orderindices(indices, size, merged);
-  }
-  bool listindices1(u32 r, const tree t, u32 *indices, u32 *merged) {
-    const slot0 *buck = hta.heap0[t.bucketid()];
-    const u32 size = 1 << --r;
-    u32 *indices1 = indices + size;
-    u32 tagi = hashwords(hashsize(r));
-    return listindices0(r, buck[t.slotid0()][tagi].tag, indices,  merged)
-        || listindices0(r, buck[t.slotid1()][tagi].tag, indices1, merged)
-        || orderindices(indices, size, merged);
-  }
-  void candidate(const tree t) {
-    proof prf, merged;
-    if (listindices1(WK, t, prf, merged)) return;
-#ifdef ATOMIC
-    u32 soli = std::atomic_fetch_add_explicit(&nsols, 1U, std::memory_order_relaxed);
-#else
-    u32 soli = nsols++;
-#endif
-    if (soli < MAXSOLS) listindices1(WK, t, sols[soli], 0);
-  }
-#else
-  // this is a differrent way to recognize most (but not all) dupes
-  // unlike MERGESORT it doesn't end up sorting the indices,
-  // but the few remaining candidates can easily
-  // affort to have a qsort applied to them in order to find remaining dupes
-  bool orderindices(u32 *indices, u32 size) {
+  void orderindices(u32 *indices, u32 size) {
     if (indices[0] > indices[size]) {
       for (u32 i=0; i < size; i++) {
         const u32 tmp = indices[i];
@@ -392,36 +327,36 @@ struct equi {
         indices[size+i] = tmp;
       }
     }
-    return false;
   }
   // listindices combines index tree reconstruction with probably dupe test
-  bool listindices0(u32 r, const tree t, u32 *indices) {
+  void listindices0(u32 r, const tree t, u32 *indices) {
     if (r == 0) {
       *indices = t.getindex();
-      return false;
+      return;
     }
     const slot1 *buck = hta.heap1[t.bucketid()];
     const u32 size = 1 << --r;
     u32 tagi = hashwords(hashsize(r));
-    return listindices1(r, buck[t.slotid0()][tagi].tag, indices)
-        || listindices1(r, buck[t.slotid1()][tagi].tag, indices+size)
-        || orderindices(indices, size) || indices[0] == indices[size];
+    listindices1(r, buck[t.slotid0()][tagi].tag, indices);
+    listindices1(r, buck[t.slotid1()][tagi].tag, indices+size);
+    orderindices(indices, size);
   }
   // need separate instance for accessing (differently typed) heap1
-  bool listindices1(u32 r, const tree t, u32 *indices) {
+  void listindices1(u32 r, const tree t, u32 *indices) {
     const slot0 *buck = hta.heap0[t.bucketid()];
     const u32 size = 1 << --r;
     u32 tagi = hashwords(hashsize(r));
-    return listindices0(r, buck[t.slotid0()][tagi].tag, indices)
-        || listindices0(r, buck[t.slotid1()][tagi].tag, indices+size)
-        || orderindices(indices, size) || indices[0] == indices[size];
+    listindices0(r, buck[t.slotid0()][tagi].tag, indices);
+    listindices0(r, buck[t.slotid1()][tagi].tag, indices+size);
+    orderindices(indices, size);
   }
   // check a candidate that resulted in 0 xor
   // add as solution, with proper subtree ordering, if it has unique indices
   void candidate(const tree t) {
     proof prf;
     // listindices combines index tree reconstruction with probably dupe test
-    if (listindices1(WK, t, prf) || duped(prf)) return; // assume WK odd
+    listindices1(WK, t, prf); // assume WK odd
+    if (duped(prf)) return;
     // and now we have ourselves a genuine solution
 #ifdef ATOMIC
     u32 soli = std::atomic_fetch_add_explicit(&nsols, 1U, std::memory_order_relaxed);
@@ -431,7 +366,6 @@ struct equi {
     // copy solution into final place
     if (soli < MAXSOLS) memcpy(sols[soli], prf, sizeof(proof));
   }
-#endif
   // show bucket stats and, if desired, size distribution
   void showbsizes(u32 r) {
     printf(" b%d h%d\n", bfull, hfull);
@@ -1012,8 +946,14 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           if (htl.equal(buck[s0], slot1)) {    // there is only 1 word of hash left
-            candidate(tree(bucketid, s0, s1)); // so a match gives a solution candidate
-            nc++;
+            const tree t0 = buck[s0][1].tag, t1 = buck[s1][1].tag;
+            if (t0.bucketid() == t1.bucketid() &&
+               (t0.slotid0() == t1.slotid0() || t0.slotid0() == t1.slotid1() ||
+                t0.slotid1() == t1.slotid0() || t0.slotid1() == t1.slotid1())) {
+            } else {
+              candidate(tree(bucketid, s0, s1)); // so a match gives a solution candidate
+              nc++;
+            }
           }
         }
       }
