@@ -52,7 +52,7 @@ static const u32 RESTMASK = NRESTS-1;
 // number of blocks of hashes extracted from single 512 bit blake2b output
 static const u32 NBLOCKS = (NHASHES+HASHESPERBLAKE-1)/HASHESPERBLAKE;
 // nothing larger found in 100000 runs
-static const u32 MAXSOLS = 8;
+static const u32 MAXSOLS = 64;
 
 // tree node identifying its children as two different slots in
 // a bucket on previous layer with the same rest bits (x-tra hash)
@@ -103,6 +103,12 @@ struct tree {
   }
   __device__ u32 xhash() const {
     return bid_s0_s1_x & RESTMASK;
+  }
+  __device__ bool prob_disjoint(const tree other) const {
+    tree xort(bid_s0_s1_x ^ other.bid_s0_s1_x);
+    return xort.bucketid() || (xort.slotid0() && xort.slotid1());
+    // next two tests catch much fewer cases and are therefore skipped
+    // && slotid0() != other.slotid1() && slotid1() != other.slotid0()
   }
 };
 
@@ -194,7 +200,7 @@ struct equi {
     nslot = 0;
     return n;
   }
-  __device__ bool orderindices(u32 *indices, u32 size) {
+  __device__ void orderindices(u32 *indices, u32 size) {
     if (indices[0] > indices[size]) {
       for (u32 i=0; i < size; i++) {
         const u32 tmp = indices[i];
@@ -202,84 +208,74 @@ struct equi {
         indices[size+i] = tmp;
       }
     }
-    return false;
   }
-  __device__ bool listindices1(const tree t, u32 *indices) {
+  __device__ void listindices1(const tree t, u32 *indices) {
     const bucket0 &buck = hta.trees0[0][t.bucketid()];
     const u32 size = 1 << 0;
     indices[0]    = buck[t.slotid0()].attr.getindex();
     indices[size] = buck[t.slotid1()].attr.getindex();
     orderindices(indices, size);
-    return false;
   }
-  __device__ bool listindices2(const tree t, u32 *indices) {
+  __device__ void listindices2(const tree t, u32 *indices) {
     const bucket1 &buck = hta.trees1[0][t.bucketid()];
     const u32 size = 1 << 1;
-    return listindices1(buck[t.slotid0()].attr, indices) || 
-           listindices1(buck[t.slotid1()].attr, indices+size) ||
-           orderindices(indices, size) || indices[0] == indices[size];
+    listindices1(buck[t.slotid0()].attr, indices);
+    listindices1(buck[t.slotid1()].attr, indices+size);
+    orderindices(indices, size);
   }
-  __device__ bool listindices3(const tree t, u32 *indices) {
+  __device__ void listindices3(const tree t, u32 *indices) {
     const bucket0 &buck = hta.trees0[1][t.bucketid()];
     const u32 size = 1 << 2;
-    return listindices2(buck[t.slotid0()].attr, indices) || 
-           listindices2(buck[t.slotid1()].attr, indices+size) ||
-           orderindices(indices, size) || indices[0] == indices[size];
+    listindices2(buck[t.slotid0()].attr, indices);
+    listindices2(buck[t.slotid1()].attr, indices+size);
+    orderindices(indices, size);
   }
-  __device__ bool listindices4(const tree t, u32 *indices) {
+  __device__ void listindices4(const tree t, u32 *indices) {
     const bucket1 &buck = hta.trees1[1][t.bucketid()];
     const u32 size = 1 << 3;
-    return listindices3(buck[t.slotid0()].attr, indices) || 
-           listindices3(buck[t.slotid1()].attr, indices+size) ||
-           orderindices(indices, size) || indices[0] == indices[size];
+    listindices3(buck[t.slotid0()].attr, indices);
+    listindices3(buck[t.slotid1()].attr, indices+size);
+    orderindices(indices, size);
   }
-  __device__ bool listindices5(const tree t, u32 *indices) {
+  __device__ void listindices5(const tree t, u32 *indices) {
     const bucket0 &buck = hta.trees0[2][t.bucketid()];
     const u32 size = 1 << 4;
-    return listindices4(buck[t.slotid0()].attr, indices) || 
-           listindices4(buck[t.slotid1()].attr, indices+size) ||
-           orderindices(indices, size) || indices[0] == indices[size];
+    listindices4(buck[t.slotid0()].attr, indices);
+    listindices4(buck[t.slotid1()].attr, indices+size);
+    orderindices(indices, size);
   }
 
 #if WK == 9
-  __device__ bool listindices6(const tree t, u32 *indices) {
+  __device__ void listindices6(const tree t, u32 *indices) {
     const bucket1 &buck = hta.trees1[2][t.bucketid()];
     const u32 size = 1 << 5;
-    return listindices5(buck[t.slotid0()].attr, indices) || 
-           listindices5(buck[t.slotid1()].attr, indices+size) ||
-           orderindices(indices, size) || indices[0] == indices[size];
+    listindices5(buck[t.slotid0()].attr, indices);
+    listindices5(buck[t.slotid1()].attr, indices+size);
+    orderindices(indices, size);
   }
-  __device__ bool listindices7(const tree t, u32 *indices) {
+  __device__ void listindices7(const tree t, u32 *indices) {
     const bucket0 &buck = hta.trees0[3][t.bucketid()];
     const u32 size = 1 << 6;
-    return listindices6(buck[t.slotid0()].attr, indices) || 
-           listindices6(buck[t.slotid1()].attr, indices+size) ||
-           orderindices(indices, size) || indices[0] == indices[size];
+    listindices6(buck[t.slotid0()].attr, indices);
+    listindices6(buck[t.slotid1()].attr, indices+size);
+    orderindices(indices, size);
   }
-  __device__ bool listindices8(const tree t, u32 *indices) {
+  __device__ void listindices8(const tree t, u32 *indices) {
     const bucket1 &buck = hta.trees1[3][t.bucketid()];
     const u32 size = 1 << 7;
-    return listindices7(buck[t.slotid0()].attr, indices) || 
-           listindices7(buck[t.slotid1()].attr, indices+size) ||
-           orderindices(indices, size) || indices[0] == indices[size];
+    listindices7(buck[t.slotid0()].attr, indices);
+    listindices7(buck[t.slotid1()].attr, indices+size);
+    orderindices(indices, size);
   }
-  __device__ bool listindices9(const tree t, u32 *indices) {
+  __device__ void listindices9(const tree t, u32 *indices) {
     const bucket0 &buck = hta.trees0[4][t.bucketid()];
     const u32 size = 1 << 8;
-    return listindices8(buck[t.slotid0()].attr, indices) || 
-           listindices8(buck[t.slotid1()].attr, indices+size) ||
-           orderindices(indices, size) || indices[0] == indices[size];
+    listindices8(buck[t.slotid0()].attr, indices);
+    listindices8(buck[t.slotid1()].attr, indices+size);
+    orderindices(indices, size);
   }
 #endif
   __device__ void candidate(const tree t) {
-    proof prf;
-#if WK==9
-    if (listindices9(t, prf)) return;
-#elif WK==5
-    if (listindices5(t, prf)) return;
-#else
-#error not implemented
-#endif
     u32 soli = atomicAdd(&nsols, 1);
     if (soli < MAXSOLS)
 #if WK==9
@@ -853,7 +849,7 @@ __global__ void digitK(equi *eq) {
       for (cd.addslot(s1, htl.getxhash0(pslot1)); cd.nextcollision(); ) { // assume WK odd
         const u32 s0 = cd.slot();
         const slot0 *pslot0 = buck + s0;
-        if (htl.equal(pslot0->hash, pslot1->hash)) {
+        if (htl.equal(pslot0->hash, pslot1->hash) && pslot0->attr.prob_disjoint(pslot1->attr)) {
 #ifdef XINTREE
           eq->candidate(tree(bucketid, s0, s1, 0));
 #else
@@ -911,6 +907,8 @@ int main(int argc, char **argv) {
   memcpy(headernonce, header, hdrlen);
   memset(headernonce+hdrlen, 0, sizeof(headernonce)-hdrlen);
 
+  checkCudaErrors(cudaSetDeviceFlags(cudaDeviceScheduleYield));
+
   u32 *heap0, *heap1;
   checkCudaErrors(cudaMalloc((void**)&heap0, sizeof(digit0)));
   checkCudaErrors(cudaMalloc((void**)&heap1, sizeof(digit1)));
@@ -930,6 +928,7 @@ int main(int argc, char **argv) {
   cudaEvent_t start, stop;
   checkCudaErrors(cudaEventCreate(&start));
   checkCudaErrors(cudaEventCreate(&stop));
+
 
   proof sols[MAXSOLS];
   u32 sumnsols = 0;
@@ -985,10 +984,10 @@ int main(int argc, char **argv) {
     cudaEventElapsedTime(&duration, start, stop);
       printf("%d rounds completed in %.3f seconds.\n", WK, duration / 1000.0f);
 
-    u32 s, nsols, maxsols = min(MAXSOLS, eq.nsols);
-    for (s = nsols = 0; s < maxsols; s++) {
+    u32 s, nsols, ndupes, maxsols = min(MAXSOLS, eq.nsols);
+    for (s = nsols = ndupes = 0; s < maxsols; s++) {
       if (duped(sols[s])) {
-        printf("Duped!\n");
+        ndupes++;
         continue;
       }
       nsols++;
@@ -999,7 +998,7 @@ int main(int argc, char **argv) {
         printf("\n");
       }
     }
-    printf("%d solutions\n", nsols);
+    printf("%d solutions %d dupes\n", nsols, ndupes);
     sumnsols += nsols;
   }
   checkCudaErrors(cudaFree(eq.nslots));
