@@ -103,22 +103,26 @@ struct tree {
   // so now we do things "manually"
   u32 bid_s0_s1;
 
+#ifdef CANTOR
+  static const u32 CANTORBITS = 2*SLOTBITS-2;
+  static const u32 CANTORMASK = (1<<CANTORBITS) - 1;
+  static const u32 CANTORMAXSQRT = 2 * NSLOTS;
+  static_assert(BUCKBITS + CANTORBITS <= 32, "cantor throws a fit");
+#else
+  static_assert(BUCKBITS + 2 * SLOTBIS <= 32, "cantor throws a fit");
+#endif
+
   // constructor for height 0 trees stores index instead
   tree(const u32 idx) {
     bid_s0_s1 = idx;
   }
+  static u32 cantor(u32 s0, u32 s1) {
+    return s1*(s1+1)/2 + s0;
+  }
   tree(const u32 bid, const u32 s0, const u32 s1) {
-// SLOTDIFF saves 1 bit by encoding the distance between
-// the two slots modulo SLOTRANGE instead, and picking
-// slotid0 such that this distance is at most SLOTRANGE/2
-// the extra branching involved gives noticeable slowdown
-#ifdef SLOTDIFF
-    u32 ds10 = (s1 - s0) & SLOTMASK;
-    if (ds10 & SLOTMSB) {
-      bid_s0_s1 = (((bid << SLOTBITS) | s1) << (SLOTBITS-1)) | (SLOTMASK & ~ds10);
-    } else {
-      bid_s0_s1 = (((bid << SLOTBITS) | s0) << (SLOTBITS-1)) | (ds10 - 1);
-    }
+// CANTOR saves 2 bits by Cantor pairing
+#ifdef CANTOR
+    bid_s0_s1 = (bid << CANTORBITS) | cantor(s0,s1);
 #else
     bid_s0_s1 = (((bid << SLOTBITS) | s0) << SLOTBITS) | s1;
 #endif
@@ -129,33 +133,46 @@ struct tree {
   }
   // retrieve bucket index
   u32 bucketid() const {
-#ifdef SLOTDIFF
-    return bid_s0_s1 >> (2 * SLOTBITS - 1);
+#ifdef CANTOR
+    return bid_s0_s1 >> (2*SLOTBITS - 2);
 #else
-    return bid_s0_s1 >> (2 * SLOTBITS);
+    return bid_s0_s1 >> (2*SLOTBITS);
 #endif
   }
   // retrieve first slot index
-  u32 slotid0() const {
-#ifdef SLOTDIFF
-    return (bid_s0_s1 >> (SLOTBITS-1)) & SLOTMASK;
-#else
-    return (bid_s0_s1 >> SLOTBITS) & SLOTMASK;
-#endif
+#ifdef CANTOR
+  u32 slotid0(u32 s1) const {
+    return (bid_s0_s1 & CANTORMASK) - cantor(0,s1);
   }
+#else
+  u32 slotid0() const {
+    return (bid_s0_s1 >> SLOTBITS) & SLOTMASK;
+  }
+#endif
   // retrieve second slot index
   u32 slotid1() const {
-#ifdef SLOTDIFF
-    return (slotid0() + 1 + (bid_s0_s1 & (SLOTMASK>>1))) & SLOTMASK;
+#ifdef CANTOR
+    u32 k, q, sqr = 8*(bid_s0_s1 & CANTORMASK)+1;;
+    // this k=sqrt(sqr) computing loop averages 3.4 iterations out of maximum 9
+    for (k = CANTORMAXSQRT; (q = sqr/k) < k; k = (k+q)/2) ;
+    return (k-1) / 2;
 #else
     return bid_s0_s1 & SLOTMASK;
 #endif
   }
   bool prob_disjoint(const tree other) const {
+#ifdef CANTOR
+    if (bucketid() != other.bucketid())
+      return true;
+    u32 s1 = slotid1(), s0 = slotid0(s1);
+    u32 os1 = other.slotid1(), os0 = other.slotid0(os1);
+    return s1 != os1 && s0 != os0;
+#else
     tree xort(bid_s0_s1 ^ other.bid_s0_s1);
     return xort.bucketid() || (xort.slotid0() && xort.slotid1());
     // next two tests catch much fewer cases and are therefore skipped
     // && slotid0() != other.slotid1() && slotid1() != other.slotid0()
+#endif
   }
 };
 
@@ -345,17 +362,28 @@ struct equi {
     const slot1 *buck = hta.heap1[t.bucketid()];
     const u32 size = 1 << --r;
     u32 tagi = hashwords(hashsize(r));
-    return listindices1(r, buck[t.slotid0()][tagi].tag, indices)
-        || listindices1(r, buck[t.slotid1()][tagi].tag, indices+size)
-        || orderindices(indices, size) || indices[0] == indices[size];
+#ifdef CANTOR
+    u32 s1 = t.slotid1(), s0 = t.slotid0(s1);
+#else
+    u32 s1 = t.slotid1(), s0 = t.slotid0();
+#endif
+    tree t0 = buck[s0][tagi].tag, t1 = buck[s1][tagi].tag;
+    return !t0.prob_disjoint(t1)
+      || listindices1(r, t0, indices) || listindices1(r, t1, indices+size)
+      || orderindices(indices, size) || indices[0] == indices[size];
   }
   // need separate instance for accessing (differently typed) heap1
   bool listindices1(u32 r, const tree t, u32 *indices) {
     const slot0 *buck = hta.heap0[t.bucketid()];
     const u32 size = 1 << --r;
     u32 tagi = hashwords(hashsize(r));
-    return listindices0(r, buck[t.slotid0()][tagi].tag, indices)
-        || listindices0(r, buck[t.slotid1()][tagi].tag, indices+size)
+#ifdef CANTOR
+    u32 s1 = t.slotid1(), s0 = t.slotid0(s1);
+#else
+    u32 s1 = t.slotid1(), s0 = t.slotid0();
+#endif
+    tree t0 = buck[s0][tagi].tag, t1 = buck[s1][tagi].tag;
+    return listindices0(r, t0, indices) || listindices0(r, t1, indices+size)
         || orderindices(indices, size) || indices[0] == indices[size];
   }
   // check a candidate that resulted in 0 xor
@@ -430,6 +458,8 @@ struct equi {
       return slot->bytes[prevbo] >> 4;
 #elif WN == 200 && RESTBITS == 8
       return (slot->bytes[prevbo] & 0xf) << 4 | slot->bytes[prevbo+1] >> 4;
+#elif WN == 200 && RESTBITS == 10
+      return (slot->bytes[prevbo] & 0x3f) << 4 | slot->bytes[prevbo+1] >> 4;
 #elif WN == 144 && RESTBITS == 4
       return slot->bytes[prevbo] & 0xf;
 #else
@@ -442,6 +472,8 @@ struct equi {
       return slot->bytes[prevbo] & 0xf;
 #elif WN == 200 && RESTBITS == 8
       return slot->bytes[prevbo];
+#elif WN == 200 && RESTBITS == 10
+      return (slot->bytes[prevbo] & 0x3) << 8 | slot->bytes[prevbo+1];
 #elif WN == 144 && RESTBITS == 4
       return slot->bytes[prevbo] & 0xf;
 #else
@@ -554,6 +586,8 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
           // figure out bucket for this hash by extracting leading BUCKBITS bits
 #if BUCKBITS == 12 && RESTBITS == 8
           const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
+#elif BUCKBITS == 10 && RESTBITS == 10
+          const u32 bucketid = ((u32)ph[0] << 2) | ph[1] >> 6;
 #elif BUCKBITS == 16 && RESTBITS == 4
           const u32 bucketid = ((u32)ph[0] << 8) | ph[1];
 #elif BUCKBITS == 20 && RESTBITS == 4
@@ -601,6 +635,9 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 #if WN == 200 && BUCKBITS == 12 && RESTBITS == 8
           xorbucketid = (((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) & 0xf) << 8)
                              | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]);
+#elif WN == 200 && BUCKBITS == 10 && RESTBITS == 10
+          xorbucketid = (((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) & 0xf) << 6)
+                             | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 2;
 #elif WN == 144 && BUCKBITS == 20 && RESTBITS == 4
           xorbucketid = ((((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 8)
                               | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2])) << 4)
@@ -651,6 +688,9 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 #if WN == 200 && BUCKBITS == 12 && RESTBITS == 8
           xorbucketid = ((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 4)
                             | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
+#elif WN == 200 && BUCKBITS == 10 && RESTBITS == 10
+          xorbucketid = ((u32)(bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) << 2)
+                            | (bytes0[htl.prevbo+3] ^ bytes1[htl.prevbo+3]) >> 6;
 #elif WN == 144 && BUCKBITS == 20 && RESTBITS == 4
           xorbucketid = ((((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 8)
                               | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2])) << 4)
