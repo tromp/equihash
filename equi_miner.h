@@ -325,7 +325,8 @@ struct equi {
     nslot = 0;
     return n;
   }
-  void orderindices(u32 *indices, u32 size) {
+  // recognize most (but not all) remaining dupes while Wagner-ordering the indices
+  bool orderindices(u32 *indices, u32 size) {
     if (indices[0] > indices[size]) {
       for (u32 i=0; i < size; i++) {
         const u32 tmp = indices[i];
@@ -333,36 +334,36 @@ struct equi {
         indices[size+i] = tmp;
       }
     }
+    return false;
   }
   // listindices combines index tree reconstruction with probably dupe test
-  void listindices0(u32 r, const tree t, u32 *indices) {
+  bool listindices0(u32 r, const tree t, u32 *indices) {
     if (r == 0) {
       *indices = t.getindex();
-      return;
+      return false;
     }
     const slot1 *buck = hta.heap1[t.bucketid()];
     const u32 size = 1 << --r;
     u32 tagi = hashwords(hashsize(r));
-    listindices1(r, buck[t.slotid0()][tagi].tag, indices);
-    listindices1(r, buck[t.slotid1()][tagi].tag, indices+size);
-    orderindices(indices, size);
+    return listindices1(r, buck[t.slotid0()][tagi].tag, indices)
+        || listindices1(r, buck[t.slotid1()][tagi].tag, indices+size)
+        || orderindices(indices, size) || indices[0] == indices[size];
   }
   // need separate instance for accessing (differently typed) heap1
-  void listindices1(u32 r, const tree t, u32 *indices) {
+  bool listindices1(u32 r, const tree t, u32 *indices) {
     const slot0 *buck = hta.heap0[t.bucketid()];
     const u32 size = 1 << --r;
     u32 tagi = hashwords(hashsize(r));
-    listindices0(r, buck[t.slotid0()][tagi].tag, indices);
-    listindices0(r, buck[t.slotid1()][tagi].tag, indices+size);
-    orderindices(indices, size);
+    return listindices0(r, buck[t.slotid0()][tagi].tag, indices)
+        || listindices0(r, buck[t.slotid1()][tagi].tag, indices+size)
+        || orderindices(indices, size) || indices[0] == indices[size];
   }
   // check a candidate that resulted in 0 xor
   // add as solution, with proper subtree ordering, if it has unique indices
   void candidate(const tree t) {
     proof prf;
     // listindices combines index tree reconstruction with probably dupe test
-    listindices1(WK, t, prf); // assume WK odd
-    if (duped(prf)) return;
+    if (listindices1(WK, t, prf) || duped(prf)) return; // assume WK odd
     // and now we have ourselves a genuine solution
 #ifdef ATOMIC
     u32 soli = std::atomic_fetch_add_explicit(&nsols, 1U, std::memory_order_relaxed);
