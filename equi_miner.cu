@@ -995,7 +995,7 @@ int main(int argc, char **argv) {
     cudaEventElapsedTime(&duration, start, stop);
       printf("%d rounds completed in %.3f seconds.\n", WK, duration / 1000.0f);
 
-    u32 s, nsols, ndupes, maxsols = min(MAXSOLS, eq.nsols);
+    u32 s, nsols, ndupes;
     for (s = nsols = ndupes = 0; s < maxsols; s++) {
       if (duped(sols[s])) {
         ndupes++;
