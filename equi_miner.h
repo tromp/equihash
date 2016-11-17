@@ -109,7 +109,7 @@ struct tree {
   static const u32 CANTORMAXSQRT = 2 * NSLOTS;
   static_assert(BUCKBITS + CANTORBITS <= 32, "cantor throws a fit");
 #else
-  static_assert(BUCKBITS + 2 * SLOTBIS <= 32, "cantor throws a fit");
+  static_assert(BUCKBITS + 2 * SLOTBITS <= 32, "cantor throws a fit");
 #endif
 
   // constructor for height 0 trees stores index instead

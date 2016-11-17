@@ -43,11 +43,11 @@ dev1:	equi.h dev_miner.h dev_miner.cpp blake2-asm/asm/zcblake2_avx2.o Makefile
 hash1:	equi.h dev_miner.h dev_miner.cpp blake2-asm/asm/zcblake2_avx2.o Makefile
 	$(GPP) -DHASHONLY dev_miner.cpp blake/blake2b.cpp blake2-asm/asm/zcblake2_avx2.o -o hash1
 
-equidev:	equi.h equi_dev_miner.h equi_dev_miner.cpp Makefile
-	$(GPP) -DATOMIC equi_dev_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equidev
+cantor:	equi.h equi_miner.h equi_miner.cpp Makefile
+	$(GPP) -DATOMIC equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o cantor
 
-equidev1:	equi.h equi_dev_miner.h equi_dev_miner.cpp blake2-avx2/blake2bip.c Makefile 
-	$(GPP) -DCANTOR -DRESTBITS=10 equi_dev_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equidev1
+cantor1:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile 
+	$(GPP) -DCANTOR -DRESTBITS=10 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o cantor1
 
 eqcuda:	equi_miner.cu equi.h blake2b.cu Makefile
 	nvcc -DXINTREE -DUNROLL -arch sm_35 equi_miner.cu blake/blake2b.cpp -o eqcuda
