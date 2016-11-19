@@ -54,16 +54,16 @@ More detailed documentation is available in the equi_miner.h source code.
 
 Performance summary (on 4GHz i7-4790K and NVidia GTX980):
 
-- equi1:        4.7 Sol/s
-- equix41:      5.9 Sol/s
-- dev1:         6.5 Sol/s
+- equi1:        4.9 Sol/s
+- equix41:      6.2 Sol/s
+- eqasm1:       6.9 Sol/s
 
-- equi -t 8:   13.7 Sol/s
+- equi   -t 8: 13.7 Sol/s
 - equix4 -t 8: 16.8 Sol/s
-- dev -t 8:    17.2 Sol/s
+- eqasm  -t 8: 17.2 Sol/s
 
 - 8 x equix41: 20.3 Sol/s
-- 8 x dev1:    20.6 Sol/s
+- 8 x eqasm1:  20.6 Sol/s
 
 - eqcuda:      27.2 Sol/s
 
