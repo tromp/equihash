@@ -50,7 +50,7 @@ cantor1:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
 	$(GPP) -DCANTOR -DRESTBITS=10 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o cantor1
 
 equidev1:	equi.h equi_dev_miner.h equi_dev_miner.cpp blake2-avx2/blake2bip.c Makefile 
-	$(GPP) -DCANTOR -DRESTBITS=10 -DUNROLL equi_dev_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o cantor1
+	$(GPP) -DCANTOR -DRESTBITS=10 -DUNROLL equi_dev_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equidev1
 
 eqcuda:	equi_miner.cu equi.h blake2b.cu Makefile
 	nvcc -DXINTREE -DUNROLL -arch sm_35 equi_miner.cu blake/blake2b.cpp -o eqcuda

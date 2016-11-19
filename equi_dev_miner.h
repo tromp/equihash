@@ -735,7 +735,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
             hfull++;
             continue;
           }
-          u32 xorbucketid = htobe32(slot0->word ^ slot1->word) >> 6 & BUCKMASK;
+          u32 xorbucketid = htobe32(slot0->word ^ slot1->word) >> 10 & BUCKMASK;
           const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
@@ -841,9 +841,9 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
             continue;
           }
           u64 *x  = (u64 *)heaps.heap0[xorbucketid][xorslot];
-          u64 *x0 = (u64 *)slot0, *x1 = (u64 *)slot1;
+          u64 *x0 = (u64 *)(slot0+1), *x1 = (u64 *)(slot1+1);
+          *x++ = x0[0] ^ x1[0];
           *x++ = x0[1] ^ x1[1];
-          *x++ = x0[2] ^ x1[2];
           ((htunit *)x)->tag = tree(bucketid, s0, s1);
         }
       }
@@ -1063,14 +1063,15 @@ void *worker(void *vp) {
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(8);
   barrier(&eq->barry);
-#else
-  for (u32 r = 1; r < WK; r++) {
+#if 0
+#endif
+#endif
+  for (u32 r = 9; r < WK; r++) {
     r&1 ? eq->digitodd(r, tp->id) : eq->digiteven(r, tp->id);
     barrier(&eq->barry);
     if (tp->id == 0) eq->showbsizes(r);
     barrier(&eq->barry);
   }
-#endif
   eq->digitK(tp->id);
   pthread_exit(NULL);
   return 0;
