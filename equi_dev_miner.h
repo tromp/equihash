@@ -107,6 +107,8 @@ struct tree {
   static const u32 CANTORBITS = 2*SLOTBITS-2;
   static const u32 CANTORMASK = (1<<CANTORBITS) - 1;
   static const u32 CANTORMAXSQRT = 2 * NSLOTS;
+  static const u32 NSLOTPAIRS = (NSLOTS-1) * (NSLOTS+2) / 2;
+  static_assert(NSLOTPAIRS <= 1<<CANTORBITS, "cantor throws a fit");
   static_assert(BUCKBITS + CANTORBITS <= 32, "cantor throws a fit");
 #else
   static_assert(BUCKBITS + 2 * SLOTBITS <= 32, "cantor throws a fit");
@@ -768,14 +770,15 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
             hfull++;
             continue;
           }
-          u32 xorbucketid = htobe32(slot0[1].word ^ slot1[1].word) >> 22;
+          u32 xor1 = slot0[1].word ^ slot1[1].word;
+          u32 xorbucketid = htobe32(xor1) >> 22;
           const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
           htunit *xs = heaps.heap0[xorbucketid][xorslot];
-          xs++->word = slot0[1].word ^ slot1[1].word;
+          xs++->word = xor1;
           u64 *x = (u64 *)xs, *x0 = (u64 *)slot0, *x1 = (u64 *)slot1;
           *x++ = x0[1] ^ x1[1];
           *x++ = x0[2] ^ x1[2];
@@ -801,14 +804,15 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
             hfull++;
             continue;
           }
-          u32 xorbucketid = htobe32(slot0->word ^ slot1->word) >> 2 & BUCKMASK;
+          u32 xor0 = slot0->word ^ slot1->word;
+          u32 xorbucketid = htobe32(xor0) >> 2 & BUCKMASK;
           const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
           htunit *xs = heaps.heap1[xorbucketid][xorslot];
-          xs++->word = slot0->word ^ slot1->word;
+          xs++->word = xor0;
           u64 *x = (u64 *)xs, *x0 = (u64 *)(slot0+1), *x1 = (u64 *)(slot1+1);
           *x++ = x0[0] ^ x1[0];
           *x++ = x0[1] ^ x1[1];
@@ -900,14 +904,15 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
             hfull++;
             continue;
           }
-          u32 xorbucketid = htobe32(slot0->word ^ slot1->word) >> 6 & BUCKMASK;
+          u32 xor0 = slot0->word ^ slot1->word;
+          u32 xorbucketid = htobe32(xor0) >> 6 & BUCKMASK;
           const u32 xorslot = getslot0(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
           htunit *xs = heaps.heap0[xorbucketid][xorslot];
-          xs++->word = slot0->word ^ slot1->word;
+          xs++->word = xor0;
           u64 *x = (u64 *)xs, *x0 = (u64 *)(slot0+1), *x1 = (u64 *)(slot1+1);
           *x++ = x0[0] ^ x1[0];
           ((htunit *)x)->tag = tree(bucketid, s0, s1);
@@ -928,20 +933,22 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
         for (; cd.nextcollision(); ) {
           const u32 s0 = cd.slot();
           const htunit *slot0 = buck[s0];
-          if (slot0[2].word == slot1[2].word) {
+          u32 xor2 = slot0[2].word ^ slot1[2].word;
+          if (!xor2) {
             hfull++;
             continue;
           }
-          u32 xorbucketid = htobe32(slot0[1].word ^ slot1[1].word) >> 18 & BUCKMASK;
+          u32 xor1 = slot0[1].word ^ slot1[1].word;
+          u32 xorbucketid = htobe32(xor1) >> 18 & BUCKMASK;
           const u32 xorslot = getslot1(xorbucketid);
           if (xorslot >= NSLOTS) {
             bfull++;
             continue;
           }
-          u64 *x  = (u64 *)heaps.heap1[xorbucketid][xorslot];
-          u64 *x0 = (u64 *)(slot0+1), *x1 = (u64 *)(slot1+1);
-          *x++ = x0[0] ^ x1[0];
-          ((htunit *)x)->tag = tree(bucketid, s0, s1);
+          htunit *xs = heaps.heap1[xorbucketid][xorslot];
+          xs++->word = xor1;
+          xs++->word = xor2;
+          xs->tag = tree(bucketid, s0, s1);
         }
       }
     }
@@ -1063,15 +1070,14 @@ void *worker(void *vp) {
   barrier(&eq->barry);
   if (tp->id == 0) eq->showbsizes(8);
   barrier(&eq->barry);
-#if 0
-#endif
-#endif
-  for (u32 r = 9; r < WK; r++) {
+#else
+  for (u32 r = 1; r < WK; r++) {
     r&1 ? eq->digitodd(r, tp->id) : eq->digiteven(r, tp->id);
     barrier(&eq->barry);
     if (tp->id == 0) eq->showbsizes(r);
     barrier(&eq->barry);
   }
+#endif
   eq->digitK(tp->id);
   pthread_exit(NULL);
   return 0;
