@@ -62,7 +62,8 @@ typedef u32 au32;
 #endif
 
 #ifndef RESTBITS
-#define RESTBITS	8
+#define CANTOR
+#define RESTBITS	10
 #endif
 
 // 2_log of number of buckets
@@ -78,6 +79,7 @@ typedef u32 au32;
 // an expected size of at least 512 has such relatively small
 // standard deviation that we can reduce capacity with negligible discarding
 // this value reduces (200,9) memory to under 144MB
+// must be under sqrt(2)/2 with -DCANTOR
 #define SAVEMEM 9/14
 #endif
 #endif

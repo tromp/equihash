@@ -63,6 +63,9 @@ int main(int argc, char **argv) {
   assert(threads);
   equi eq(nthreads);
   printf("Using %dMB of memory and %d-way blake2b\n", 1 + eq.hta.alloced / 0x100000, NBLAKES);
+#ifdef ASM_BLAKE
+  printf("Using xenoncat's assembly blake code\n");
+#endif
   u32 sumnsols = 0;
   char headernonce[HEADERNONCELEN];
   u32 hdrlen = strlen(header);
