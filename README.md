@@ -58,18 +58,15 @@ Performance summary (on 4GHz i7-4790K and NVidia GTX980):
 - equix41:      6.2 Sol/s
 - eqasm1:       6.9 Sol/s
 
-- equi   -t 8: 13.7 Sol/s
-- equix4 -t 8: 16.8 Sol/s
-- eqasm  -t 8: 17.2 Sol/s
-
-- 8 x equix41: 20.3 Sol/s
-- 8 x eqasm1:  20.6 Sol/s
+- 8 x equi1:   22.2 Sol/s
+- 8 x equix41: 27.1 Sol/s
+- 8 x eqasm1:  27.2 Sol/s
 
 - eqcuda:      27.2 Sol/s
 
 And now, for something completely different: (144,5) taking 2.6 GB of memory
 
-- eq1445 -t 8:     1.0 Sol/s
-- eq1445x4 -t 8:   1.2 Sol/s
+- eq1445   -t 8: 1.0 Sol/s
+- eq1445x4 -t 8: 1.2 Sol/s
 
-- eqcuda1445:      2.2 Sol/s
+- eqcuda1445:    2.2 Sol/s
