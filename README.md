@@ -50,6 +50,14 @@ xor-able slots, which gave me the final speed boost.
 On Thursday Nov 3, user elbandi on Slack reported a bug in verify() where it allows a non-zero
 final digit in the top-level xor. That is now fixed.
 
+On November 11, I implemented an interleaved 8-way blake, but this turned out to provide no gain.
+
+On November 17, I added Cantor coding for slot pairs, as found in xenoncat's and morpav's solvers.
+This allows the use of 2^10 buckets for (200,9) which turns out to be a small gain,
+so I made this the new default.
+
+I implemented prefetching for memory writes, but found no gain, and left the code out.
+
 More detailed documentation is available in the equi_miner.h source code.
 
 Performance summary (on 4GHz i7-4790K and NVidia GTX980):
@@ -70,3 +78,62 @@ And now, for something completely different: (144,5) taking 2.6 GB of memory
 - eq1445x4 -t 8: 1.2 Sol/s
 
 - eqcuda1445:    2.2 Sol/s
+
+Contest judges requested the following information:
+
+1. A brief self-assessment of your submission per the published judging criteria.
+
+- testibility is integrated into the submission by provision of a 
+    int verify(proof indices, const char *headernonce, const u32 headerlen);
+  routine, and standalone verifier equi.c. This is part of the default make targets
+  together with tests for both the (200,9) and (144,5) parameters.
+- despite lack of implementation of the suggested API, the implemented API of
+    equi(const u32 n_threads);
+  for solver construction, with methods
+    void setheadernonce(const char *headernonce, const u32 len);
+    void digit0(const u32 id);
+    void digitodd(const u32 r, const u32 id);
+    void digiteven(const u32 r, const u32 id);
+    void digitK(const u32 id);
+  and specialized unrolled versions
+    void digit1(const u32 id);
+    ...
+    void digit8(const u32 id);
+  have proved practical enough to support integration into zcashd and nicehash miners.
+- the submission is written with portability in mind, with no dependencies beyond pthreads,
+  no architectural assumptions like word size or endian-ness, and using a subset of C++ features
+  (i.e. no templates) for ease of porting to plain C.
+- SIMD support is available in two ways:
+  1) through an included blake2b reference impolementation that's been modified to make compression
+     rounds strict rather than lazy, allowing for computation of an actual midstate
+  2) through a custom 4-way blake2b implementation using intrinsics based on Samuel Neves' blake2bp code
+- the implementation supports (200,9) and (144,5) out of the box, and can easily adapt to other
+  parameters by changing a few lines to select the appropriate bit segements from the hash.
+- memory is already minimized to the point of losing a tiny fraction of solutions (much less than 1%),
+  but can trivially be reduced further with a compile time define, at the cost of more discarding.
+- file equi_miner.h contains both a problem description as well as a very rough algorithm overview,
+  followed by a slightly more detailed overview in lines 243--277. beyond that many single line
+  comments can be found throughout the code.
+- a list of post-deadline improvements may be found above, as well as expected performance.
+- the solution rate has been measured as 1.88 Sol/run,
+  with a fraction of about 0.002 of solutions discarded.
+- due to static allocation, average and peak memory conincide.
+- runtime varies only slightly (a few %) from run ro run.
+
+2. An explanation about what you think are the strengths of your submission.
+
+- relatively portable, concise and straightforward code
+- support for multiple parameter sets including (144,5)
+- multi-threading support (crucial for 144,5)
+- support for a wide range of buckets
+- support for storing part of hash in treenode to further optimize space use
+- support for CUDA devices
+- minimal staticically allocated memory use
+- optional visualization of bucket size distribution
+
+3. An explanation about what you think are the weaknesses of your submission.
+
+- single threaded x86 performance on (200,9) lags somewhat behind other solvers
+- lacking a 2-way blake SIMD implementation
+- CUDA solver treats GPU as a many core cpu and fails to take better advantage of architectural
+  features.
