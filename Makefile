@@ -17,7 +17,7 @@ equix41:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
 	$(GPP) -mavx2 -DNBLAKES=4 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equix41
 
 equix81:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
-	$(GPP) -mavx2 -DNBLAKES=8 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equix41
+	$(GPP) -mavx2 -DNBLAKES=8 equi_miner.cpp blake/blake2b.cpp blake2-avx2/blake2bip.c -o equix81
 
 equi1g:	equi.h equi_miner.h equi_miner.cpp Makefile
 	g++ -g -std=c++11 -DLOGSPARK -DSPARKSCALE=11 equi_miner.cpp blake/blake2b.cpp -pthread -o equi1g
