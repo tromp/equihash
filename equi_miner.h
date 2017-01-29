@@ -128,6 +128,27 @@ static const u32 MAXSOLS = 8;               // more than 8 solutions are rare
 
 // tree node identifying its children as two different slots in
 // a bucket on previous layer with matching rest bits (x-tra hash)
+#ifdef CANTOR
+#define CANTORBITS (2*SLOTBITS-2)
+#define CANTORMASK ((1<<CANTORBITS) - 1)
+#define CANTORMAXSQRT (2 * NSLOTS)
+#define NSLOTPAIRS ((NSLOTS-1) * (NSLOTS+2) / 2)
+  static_assert(NSLOTPAIRS <= 1<<CANTORBITS, "cantor throws a fit");
+#define TREEMINBITS (BUCKBITS + CANTORBITS)
+#else
+#define TREEMINBITS (BUCKBITS + 2 * SLOTBITS )
+#endif
+
+#if 0 && TREEMINBITS <= 16
+  typedef u16 tree_t;
+#elif TREEMINBITS <= 32
+  typedef u32 tree_t;
+#else
+#error tree doesn't fit in 32 bits
+#endif
+
+#define TREEBITS (8*sizeof(tree_t))
+
 struct tree {
   // formerly i had these bitfields
   // unsigned bucketid : BUCKBITS;
@@ -135,18 +156,7 @@ struct tree {
   // unsigned slotid1 : SLOTBITS;
   // but these were poorly optimized by the compiler
   // so now we do things "manually"
-  u32 bid_s0_s1;
-
-#ifdef CANTOR
-  static const u32 CANTORBITS = 2*SLOTBITS-2;
-  static const u32 CANTORMASK = (1<<CANTORBITS) - 1;
-  static const u32 CANTORMAXSQRT = 2 * NSLOTS;
-  static const u32 NSLOTPAIRS = (NSLOTS-1) * (NSLOTS+2) / 2;
-  static_assert(NSLOTPAIRS <= 1<<CANTORBITS, "cantor throws a fit");
-  static_assert(BUCKBITS + CANTORBITS <= 32, "cantor throws a fit");
-#else
-  static_assert(BUCKBITS + 2 * SLOTBITS <= 32, "cantor throws a fit");
-#endif
+  tree_t bid_s0_s1;
 
   // constructor for height 0 trees stores index instead
   tree(const u32 idx) {
@@ -220,11 +230,11 @@ struct tree {
 // and sometimes 8 bits at a time (bytes)
 union htunit {
   tree tag;
-  u32 word;
-  uchar bytes[sizeof(u32)];
+  tree_t word;
+  uchar bytes[sizeof(tree_t)];
 };
 
-#define WORDS(bits)	((bits + 31) / 32)
+#define WORDS(bits)	((bits + TREEBITS-1) / TREEBITS)
 #define HASHWORDS0 WORDS(WN - DIGITBITS + RESTBITS)
 #define HASHWORDS1 WORDS(WN - 2*DIGITBITS + RESTBITS)
 
@@ -301,7 +311,7 @@ struct htalloc {
     alloced = 0;
   }
   void alloctrees() {
-    static_assert(DIGITBITS >= 16, "needed to ensure hashes shorten by 1 unit every 2 digits");
+    static_assert(2*DIGITBITS >= TREEBITS, "needed to ensure hashes shorten by 1 unit every 2 digits");
     heap0 = (bucket0 *)alloc(NBUCKETS, sizeof(bucket0));
     heap1 = (bucket1 *)alloc(NBUCKETS, sizeof(bucket1));
   }
@@ -329,7 +339,7 @@ struct equi {
   u32 hfull;               // count number of xor-ed hash with last 32 bits zero
   pthread_barrier_t barry; // used to sync threads
   equi(const u32 n_threads) {
-    static_assert(sizeof(htunit) == 4, "");
+    static_assert(sizeof(htunit) == sizeof(tree_t), "");
     static_assert(WK&1, "K assumed odd in candidate() calling indices1()");
     nthreads = n_threads;
     const int err = pthread_barrier_init(&barry, NULL, nthreads);
@@ -497,30 +507,32 @@ struct equi {
     }
     // extract remaining bits in digit slots in same bucket still need to collide on
     u32 getxhash0(const htunit* slot) const {
-#if WN == 200 && RESTBITS == 4
+#if DIGITBITS % 8 == 4 && RESTBITS == 4
       return slot->bytes[prevbo] >> 4;
-#elif WN == 200 && RESTBITS == 8
+#elif DIGITBITS % 8 == 4 && RESTBITS == 8
       return (slot->bytes[prevbo] & 0xf) << 4 | slot->bytes[prevbo+1] >> 4;
-#elif WN == 200 && RESTBITS == 10
+#elif DIGITBITS % 8 == 4 && RESTBITS == 10
       return (slot->bytes[prevbo] & 0x3f) << 4 | slot->bytes[prevbo+1] >> 4;
-#elif WN == 144 && RESTBITS == 4
+#elif DIGITBITS % 8 == 0 && RESTBITS == 4
       return slot->bytes[prevbo] & 0xf;
+#elif RESTBITS == 0
+      return 0;
 #else
-#error non implemented
+#error not implemented
 #endif
     }
     // similar but accounting for possible change in hashsize modulo 4 bits
     u32 getxhash1(const htunit* slot) const {
-#if WN == 200 && RESTBITS == 4
+#if DIGITBITS % 4 == 0 && RESTBITS == 4
       return slot->bytes[prevbo] & 0xf;
-#elif WN == 200 && RESTBITS == 8
+#elif DIGITBITS % 4 == 0 && RESTBITS == 8
       return slot->bytes[prevbo];
-#elif WN == 200 && RESTBITS == 10
+#elif DIGITBITS % 4 == 0 && RESTBITS == 10
       return (slot->bytes[prevbo] & 0x3) << 8 | slot->bytes[prevbo+1];
-#elif WN == 144 && RESTBITS == 4
-      return slot->bytes[prevbo] & 0xf;
+#elif RESTBITS == 0
+      return 0;
 #else
-#error non implemented
+#error not implemented
 #endif
     }
     // test whether two hashes match in last 32 bits
@@ -639,6 +651,8 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
           const u32 bucketid = ((u32)ph[0] << 8) | ph[1];
 #elif BUCKBITS == 20 && RESTBITS == 4
           const u32 bucketid = ((((u32)ph[0] << 8) | ph[1]) << 4) | ph[2] >> 4;
+#elif BUCKBITS == 4 && RESTBITS == 4
+          const u32 bucketid = (u32)(ph[0] >> 4);
 #else
 #error not implemented
 #endif
@@ -692,6 +706,8 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 #elif WN == 96 && BUCKBITS == 12 && RESTBITS == 4
           xorbucketid = ((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 4)
                             | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
+#elif WN == 48 && BUCKBITS == 4 && RESTBITS == 4
+          xorbucketid = (u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) >> 4;
 #else
 #error not implemented
 #endif
@@ -745,6 +761,8 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 #elif WN == 96 && BUCKBITS == 12 && RESTBITS == 4
           xorbucketid = ((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 4)
                             | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
+#elif WN == 48 && BUCKBITS == 4 && RESTBITS == 4
+          xorbucketid = (u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 4;
 #else
 #error not implemented
 #endif

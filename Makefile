@@ -22,6 +22,12 @@ equix81:	equi.h equi_miner.h equi_miner.cpp blake2-avx2/blake2bip.c Makefile
 equi1g:	equi.h equi_miner.h equi_miner.cpp Makefile
 	g++ -g -std=c++11 -DLOGSPARK -DSPARKSCALE=11 equi_miner.cpp blake/blake2b.cpp -pthread -o equi1g
 
+eq485:	equi.h equi_miner.h equi_miner.cpp Makefile
+	$(GPP) -DATOMIC -DWN=48 -DWK=5 -DRESTBITS=4 equi_miner.cpp blake/blake2b.cpp -o eq485
+
+eq4851:	equi.h equi_miner.h equi_miner.cpp Makefile
+	$(GPP) -DWN=48 -DWK=5 -DRESTBITS=4 equi_miner.cpp blake/blake2b.cpp -o eq4851
+
 eq1445:	equi.h equi_miner.h equi_miner.cpp Makefile
 	$(GPP) -DATOMIC -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp -o eq1445
 
@@ -74,4 +80,4 @@ blake2-asm/asm/zcblake2_avx2.o:
 	make -C blake2-asm
 
 clean:	
-	make -C blake2b clean && rm -f eqasm eqasm1 equi equi1 equix4 equix41 equi1g eq1445 eq14451 eq1445x4 eq1445x41 eqcuda eqcuda1445 verify
+	make -C blake2b clean && rm -f eqasm eqasm1 equi equi1 equix4 equix41 equi1g eq485 eq4851 eq1445 eq14451 eq1445x4 eq1445x41 eqcuda eqcuda1445 verify
