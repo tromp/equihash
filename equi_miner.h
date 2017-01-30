@@ -20,14 +20,13 @@
 // The algorithm below solves this by storing trees
 // as a directed acyclic graph of K layers
 // The n digit bits are split into
-// n-RESTBITS bucket bits and RESTBITS leftover bits
+// BUCKBITS=n-RESTBITS bucket bits and RESTBITS leftover bits
 // Each layer i, consisting of height i subtrees
-// whose xor starts with i*n 0s, is partitioned into
-// 2^{n-RESTBITS} buckets according to the next n-RESTBITS
-// in the xor
+// whose xor starts with i 0-digits, is partitioned into
+// 2^BUCKBITS buckets according to the next BUCKBITS in the xor
 // Within each bucket, trees whose xor match in the
-// next RESTBITS bits are combined to produce trees
-// in the next layer
+// remaining RESTBITS bits of the digit are combined
+// to produce trees in the next layer
 // To eliminate trees with duplicated indices,
 // we simply test if the last 32 bits of the xor are 0,
 // and if so, assume that this is due to index duplication
@@ -133,7 +132,7 @@ static const u32 MAXSOLS = 8;               // more than 8 solutions are rare
 #define CANTORMASK ((1<<CANTORBITS) - 1)
 #define CANTORMAXSQRT (2 * NSLOTS)
 #define NSLOTPAIRS ((NSLOTS-1) * (NSLOTS+2) / 2)
-  static_assert(NSLOTPAIRS <= 1<<CANTORBITS, "cantor throws a fit");
+static_assert(NSLOTPAIRS <= 1<<CANTORBITS, "cantor throws a fit");
 #define TREEMINBITS (BUCKBITS + CANTORBITS)
 #else
 #define TREEMINBITS (BUCKBITS + 2 * SLOTBITS )
@@ -147,7 +146,8 @@ static const u32 MAXSOLS = 8;               // more than 8 solutions are rare
 #error tree doesn't fit in 32 bits
 #endif
 
-#define TREEBITS (8*sizeof(tree_t))
+#define TREEBYTES sizeof(tree_t)
+#define TREEBITS (8*TREEBYTES)
 
 struct tree {
   // formerly i had these bitfields
@@ -206,6 +206,7 @@ struct tree {
     return bid_s0_s1 & SLOTMASK;
 #endif
   }
+  // returns false for trees sharing a child subtree
   bool prob_disjoint(const tree other) const {
 #ifdef CANTOR
     if (bucketid() != other.bucketid())
@@ -299,7 +300,7 @@ u32 hashsize(const u32 r) {
 
 // convert bytes into words,rounding up
 u32 hashwords(u32 bytes) {
-  return (bytes + 3) / 4;
+  return (bytes + TREEBYTES-1) / TREEBYTES;
 }
 
 // manages hash and tree data
