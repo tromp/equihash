@@ -100,6 +100,9 @@ typedef u32 au32;
 // 2_log of number of buckets
 #define BUCKBITS (DIGITBITS-RESTBITS)
 
+// 2_log of number of slots per bucket
+#define SLOTBITS (RESTBITS+1+1)
+
 // by default buckets have a capacity of twice their expected size
 // but this factor reduced it accordingly
 #ifndef SAVEMEM
@@ -117,7 +120,6 @@ typedef u32 au32;
 
 static const u32 NBUCKETS = 1<<BUCKBITS;    // number of buckets
 static const u32 BUCKMASK = NBUCKETS-1;     // corresponding bucket mask
-static const u32 SLOTBITS = RESTBITS+1+1;   // 2_log of number of slots per bucket
 static const u32 SLOTRANGE = 1<<SLOTBITS;   // default bucket capacity
 static const u32 SLOTMASK = SLOTRANGE-1;    // corresponding SLOTBITS mask
 static const u32 SLOTMSB = 1<<(SLOTBITS-1); // most significat bit in SLOTMASK
@@ -138,7 +140,7 @@ static_assert(NSLOTPAIRS <= 1<<CANTORBITS, "cantor throws a fit");
 #define TREEMINBITS (BUCKBITS + 2 * SLOTBITS )
 #endif
 
-#if 0 && TREEMINBITS <= 16
+#if TREEMINBITS <= 16
   typedef u16 tree_t;
 #elif TREEMINBITS <= 32
   typedef u32 tree_t;
@@ -497,12 +499,12 @@ struct equi {
   
     htlayout(equi *eq, u32 r): hta(eq->hta), prevhtunits(0), dunits(0) {
       u32 nexthashbytes = hashsize(r);        // number of bytes occupied by round r hash
-      nexthtunits = hashwords(nexthashbytes); // number of 32bit words taken up by those bytes
+      nexthtunits = hashwords(nexthashbytes); // number of TREEBITS words taken up by those bytes
       prevbo = 0;                  // byte offset for accessing hash form previous round
       if (r) {     // similar measure for previous round
         u32 prevhashbytes = hashsize(r-1);
         prevhtunits = hashwords(prevhashbytes);
-        prevbo = prevhtunits * sizeof(htunit) - prevhashbytes; // 0-3
+        prevbo = prevhtunits * sizeof(htunit) - prevhashbytes; // 0-1 or 0-3
         dunits = prevhtunits - nexthtunits; // number of words by which hash shrinks
       }
     }
@@ -536,7 +538,7 @@ struct equi {
 #error not implemented
 #endif
     }
-    // test whether two hashes match in last 32 bits
+    // test whether two hashes match in last TREEBITS bits
     bool equal(const htunit *hash0, const htunit *hash1) const {
       return hash0[prevhtunits-1].word == hash1[prevhtunits-1].word;
     }
@@ -763,7 +765,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
           xorbucketid = ((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 4)
                             | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
 #elif WN == 48 && BUCKBITS == 4 && RESTBITS == 4
-          xorbucketid = (u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 4;
+          xorbucketid = (u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) >> 4;
 #else
 #error not implemented
 #endif
