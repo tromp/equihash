@@ -145,7 +145,7 @@ static_assert(NSLOTPAIRS <= 1<<CANTORBITS, "cantor throws a fit");
 #elif TREEMINBITS <= 32
   typedef u32 tree_t;
 #else
-#error tree doesn't fit in 32 bits
+#error tree doesnt fit in 32 bits
 #endif
 
 #define TREEBYTES sizeof(tree_t)
