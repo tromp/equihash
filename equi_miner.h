@@ -646,16 +646,12 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
         for (u32 j = 0; j<HASHESPERBLAKE; j++) {
           const uchar *ph = hashes + i * 64 + j * WN/8;
           // figure out bucket for this hash by extracting leading BUCKBITS bits
-#if BUCKBITS == 12 && RESTBITS == 8
-          const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
-#elif BUCKBITS == 10 && RESTBITS == 10
-          const u32 bucketid = ((u32)ph[0] << 2) | ph[1] >> 6;
-#elif BUCKBITS == 16 && RESTBITS == 4
-          const u32 bucketid = ((u32)ph[0] << 8) | ph[1];
-#elif BUCKBITS == 20 && RESTBITS == 4
-          const u32 bucketid = ((((u32)ph[0] << 8) | ph[1]) << 4) | ph[2] >> 4;
-#elif BUCKBITS == 4 && RESTBITS == 4
-          const u32 bucketid = (u32)(ph[0] >> 4);
+#if BUCKBITS <= 8
+          const u32 bucketid = (u32)(ph[0] >> (8-BUCKBITS));
+#elif BUCKBITS > 8 && BUCKBITS <= 16
+          const u32 bucketid = ((u32)ph[0] << (BUCKBITS-8)) | ph[1] >> (16-BUCKBITS);
+#elif BUCKBITS > 16
+          const u32 bucketid = ((((u32)ph[0] << 8) | ph[1]) << (BUCKBITS-16)) | ph[2] >> (24-BUCKBITS);
 #else
 #error not implemented
 #endif
@@ -783,6 +779,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
     }
   }
   
+#if WN==200 && WK==9
   // functions digit1 through digit9 are unrolled versions specific to the
   // (N=200,K=9) parameters with 10 RESTBITS
   void digit1(const u32 id) {
@@ -1050,6 +1047,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
       }
     }
   }
+#endif
   
   // final round looks simpler
   void digitK(const u32 id) {
