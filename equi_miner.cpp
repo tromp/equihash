@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
   thread_ctx *threads = (thread_ctx *)calloc(nthreads, sizeof(thread_ctx));
   assert(threads);
   equi eq(nthreads);
-  printf("Using %dMB of memory and %d-way blake2b\n", 1 + eq.hta.alloced / 0x100000, NBLAKES);
+  printf("Using 2^%d buckets, %dMB of memory, and %d-way blake2b\n", BUCKBITS, 1 + eq.hta.alloced / 0x100000, NBLAKES);
 #ifdef ASM_BLAKE
   printf("Using xenoncat's assembly blake code\n");
 #endif

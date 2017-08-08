@@ -346,14 +346,18 @@ struct equi {
     __device__ u32 getxhash0(const slot0* pslot) const {
 #ifdef XINTREE
       return pslot->attr.xhash();
-#elif WN == 200 && RESTBITS == 4
+#elif DIGITBITS % 8 == 4 && RESTBITS == 4
       return pslot->hash->bytes[prevbo] >> 4;
-#elif WN == 200 && RESTBITS == 8
-      return (pslot->hash->bytes[prevbo] & 0xf) << 4 | pslot->hash->bytes[prevbo+1] >> 4;
-#elif WN == 144 && RESTBITS == 4
-      return pslot->hash->bytes[prevbo] & 0xf;
-#elif WN == 200 && RESTBITS == 6
+#elif DIGITBITS % 8 == 4 && RESTBITS == 6
       return (pslot->hash->bytes[prevbo] & 0x3) << 4 | pslot->hash->bytes[prevbo+1] >> 4;
+#elif DIGITBITS % 8 == 4 && RESTBITS == 8
+      return (pslot->hash->bytes[prevbo] & 0xf) << 4 | pslot->hash->bytes[prevbo+1] >> 4;
+#elif DIGITBITS % 8 == 4 && RESTBITS == 10
+      return (pslot->hash->bytes[prevbo] & 0x3f) << 4 | pslot->hash->bytes[prevbo+1] >> 4;
+#elif DIGITBITS % 8 == 0 && RESTBITS == 4
+      return pslot->hash->bytes[prevbo] & 0xf;
+#elif RESTBITS == 0
+      return 0;
 #else
 #error non implemented
 #endif
@@ -361,14 +365,16 @@ struct equi {
     __device__ u32 getxhash1(const slot1* pslot) const {
 #ifdef XINTREE
       return pslot->attr.xhash();
-#elif WN == 200 && RESTBITS == 4
+#elif DIGITBITS % 4 == 0 && RESTBITS == 4
       return pslot->hash->bytes[prevbo] & 0xf;
-#elif WN == 200 && RESTBITS == 8
+#elif DIGITBITS % 4 == 0 && RESTBITS == 6
+      return pslot->hash->bytes[prevbo] & 0x3f;
+#elif DIGITBITS % 4 == 0 && RESTBITS == 8
       return pslot->hash->bytes[prevbo];
-#elif WN == 144 && RESTBITS == 4
-      return pslot->hash->bytes[prevbo] & 0xf;
-#elif WN == 200 && RESTBITS == 6
-      return pslot->hash->bytes[prevbo] &0x3f;
+#elif DIGITBITS % 4 == 0 && RESTBITS == 10
+      return (pslot->hash->bytes[prevbo] & 0x3) << 8 | pslot->hash->bytes[prevbo+1];
+#elif RESTBITS == 0
+      return 0;
 #else
 #error non implemented
 #endif
@@ -463,7 +469,9 @@ __global__ void digitH(equi *eq) {
 #endif
 #elif BUCKBITS == 12 && RESTBITS == 4
       const u32 bucketid = ((u32)ph[0] << 4) | ph[1] >> 4;
+#ifdef XINTREE
       const u32 xhash = ph[1] & 0xf;
+#endif
 #else
 #error not implemented
 #endif
