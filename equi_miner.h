@@ -711,7 +711,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 #elif WN == 200 && BUCKBITS == 10 && RESTBITS == 10
           xorbucketid = (((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) & 0xf) << 6)
                              | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 2;
-#elif WN == 144 && BUCKBITS == 20 && RESTBITS == 4
+#elif WN % 24 == 0 && BUCKBITS == 20 && RESTBITS == 4
           xorbucketid = ((((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 8)
                               | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2])) << 4)
                               | (bytes0[htl.prevbo+3] ^ bytes1[htl.prevbo+3]) >> 4;
@@ -766,7 +766,7 @@ static const u32 NBLOCKS = (NHASHES+HASHESPERBLOCK-1)/HASHESPERBLOCK;
 #elif WN == 200 && BUCKBITS == 10 && RESTBITS == 10
           xorbucketid = ((u32)(bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) << 2)
                             | (bytes0[htl.prevbo+3] ^ bytes1[htl.prevbo+3]) >> 6;
-#elif WN == 144 && BUCKBITS == 20 && RESTBITS == 4
+#elif WN % 24 == 0 && BUCKBITS == 20 && RESTBITS == 4
           xorbucketid = ((((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 8)
                               | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2])) << 4)
                               | (bytes0[htl.prevbo+3] ^ bytes1[htl.prevbo+3]) >> 4;
