@@ -41,36 +41,47 @@
 #include "blake2-avx2/blake2bip.h"
 
 #ifdef ASM_BLAKE
+
 #ifdef NBLAKES
 #if NBLAKES != 4
 #error only 4-way assembly blake
 #endif
 #else
 #define NBLAKES 4
-#endif
+#endif // ifdef NBLAKES
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
 void Blake2PrepareMidstate4(void *midstate, uchar *input);
+
 #ifdef __cplusplus
 }
 #endif
+
 //midstate: 256 bytes of buffer for output midstate, aligned by 32
 //input: 140 bytes header, preferably aligned by 8
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
 void Blake2Run4(uchar *hashout, void *midstate, u32 indexctr);
+
 #ifdef __cplusplus
 }
 #endif
+
 struct blake_state {
   alignas(32) uchar state[256];
 };
+
 #else
+
 typedef blake2b_state blake_state;
-#endif
+
+#endif // ifdef ASM_BLAKE
 
 #if defined __builtin_bswap32 && defined __LITTLE_ENDIAN
 #undef htobe32
@@ -90,7 +101,7 @@ typedef uint64_t u64;
 typedef std::atomic<u32> au32;
 #else
 typedef u32 au32;
-#endif
+#endif // ifdef ATOMIC
 
 #ifndef RESTBITS
 #define CANTOR
@@ -106,17 +117,19 @@ typedef u32 au32;
 // by default buckets have a capacity of twice their expected size
 // but this factor reduced it accordingly
 #ifndef SAVEMEM
-#if RESTBITS == 4
-// can't save memory in such small buckets
+
+#if RESTBITS < 8
+// can't save much memory in such small buckets
 #define SAVEMEM 1
-#elif RESTBITS >= 8
+#else
 // an expected size of at least 512 has such relatively small
 // standard deviation that we can reduce capacity with negligible discarding
 // this value reduces (200,9) memory to under 144MB
 // must be under sqrt(2)/2 with -DCANTOR
 #define SAVEMEM 9/14
-#endif
-#endif
+#endif // RESTBITS == 4
+
+#endif // ifndef SAVEMEM
 
 static const u32 NBUCKETS = 1<<BUCKBITS;    // number of buckets
 static const u32 BUCKMASK = NBUCKETS-1;     // corresponding bucket mask

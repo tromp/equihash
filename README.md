@@ -7,8 +7,10 @@ The executables ending in 1 are compiled without atomics and thus
 only suitable for single-threaded use (where they get some speedup over the generic version).
 
 Options -h HEADER -n NONCE are self explanatory.
+Non-ascii headers can be provided in hexadecimal with option -x HEXHEADER.
 Add option -r RANGESIZE to search a range of nonces.
 For benching, options -n 255 -r 100 are useful as it gets exactly 188 solutions from 100 runs.
+Finally, option -s shows the solutions.
 
 My original submission was triggered by seeing how xenoncat's
 "has much of the same ideas as mine" so that making my open sourcing conditional
