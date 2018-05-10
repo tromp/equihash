@@ -78,7 +78,6 @@ int main(int argc, char **argv) {
     memset(headernonce+hdrlen, 0, sizeof(headernonce)-hdrlen);
   }
   for (int r = 0; r < range; r++) {
-    ((u32 *)headernonce)[32] = htole32(nonce+r);
     ((u32 *)headernonce)[27] = htole32(nonce+r);
     eq.setheadernonce(headernonce, sizeof(headernonce));
     for (int t = 0; t < nthreads; t++) {
