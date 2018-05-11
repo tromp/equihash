@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include "ctype.h"
 
+#define COMPRESSED_SOL_SIZE (PROOFSIZE * (DIGITBITS + 1) / 8)
+
 int hextobyte(const char * x) {
   u32 b = 0;
   for (int i = 0; i < 2; i++) {
@@ -15,15 +17,34 @@ int hextobyte(const char * x) {
   return b;
 }
 
+void compress_solution(const proof sol, uchar* csol) {
+  uchar b;
+  for (u32 i = 0, j = 0, bits_left = DIGITBITS + 1;
+      j < COMPRESSED_SOL_SIZE; csol[j++] = b) {
+    if (bits_left >=8) {
+      // Read next 8 bits, stay at same sol index
+      b = sol[i] >> (bits_left -= 8);
+    } else { // less than 8 bits to read
+      // Read remaining bits and shift left to make space for next sol index
+      b = sol[i];
+      b <<= (8 - bits_left); // may also set b=0 if bits_left was 0, which is fine
+      // Go to next sol index and read remaining bits
+      bits_left += DIGITBITS + 1 - 8;
+      b |= sol[++i] >> bits_left;
+    }
+  }
+}
+
 int main(int argc, char **argv) {
   int nthreads = 1;
   int nonce = 0;
   int range = 1;
   bool showsol = false;
+  bool compress_sol = false;
   const char *header = "";
   const char *hex = "";
   int c;
-  while ((c = getopt (argc, argv, "h:n:r:t:x:s")) != -1) {
+  while ((c = getopt (argc, argv, "h:n:r:t:x:sc")) != -1) {
     switch (c) {
       case 'h':
         header = optarg;
@@ -42,6 +63,9 @@ int main(int argc, char **argv) {
         break;
       case 'x':
         hex = optarg;
+        break;
+      case 'c':
+        compress_sol = true;
         break;
     }
   }
@@ -94,8 +118,17 @@ int main(int argc, char **argv) {
     for (nsols = 0; nsols < maxsols; nsols++) {
       if (showsol) {
         printf("\nSolution");
-        for (u32 i = 0; i < PROOFSIZE; i++)
-          printf(" %jx", (uintmax_t)eq.sols[nsols][i]);
+        if (compress_sol) {
+          printf(" ");
+          uchar csol[COMPRESSED_SOL_SIZE];
+          compress_solution(eq.sols[nsols], csol);
+          for (u32 i = 0; i < COMPRESSED_SOL_SIZE; ++i) {
+            printf("%02hhx", csol[i]);
+          }
+        } else {
+          for (u32 i = 0; i < PROOFSIZE; i++)
+            printf(" %jx", (uintmax_t)eq.sols[nsols][i]);
+        }
       }
     }
     printf("\n%d solutions\n", nsols);
