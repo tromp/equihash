@@ -10,6 +10,8 @@
 typedef uint16_t u16;
 typedef uint64_t u64;
 
+#define htole32(x) (x)
+
 #define checkCudaErrors(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true) {
   if (code != cudaSuccess) {
@@ -290,6 +292,8 @@ struct equi {
     if (soli < MAXSOLS)
 #if WK==9
       listindices9(t, sols[soli]);
+#elif WK==7
+      listindices7(t, sols[soli]);
 #elif WK==5
       listindices5(t, sols[soli]);
 #else

@@ -98,7 +98,7 @@ static void G(const int r, const int i, u64 &a, u64 &b, u64 &c, u64 &d, u64 cons
   G(r, 7, v[3], v[4], v[ 9], v[14], m);
 
 __device__ void blake2b_gpu_hash(blake2b_state *state, u32 idx, uchar *hash, u32 outlen) {
-  const u32 leb = htole32(idx);
+  const u32 leb = idx; // CUDA is little endian, so no need for htole32(idx)
   memcpy(state->buf + state->buflen, &leb, sizeof(u32));
   state->buflen += sizeof(u32);
   state->counter += state->buflen;
