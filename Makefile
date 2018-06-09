@@ -61,6 +61,9 @@ eqcudah:	equi_miner.cu equi.h blake2b.cu Makefile
 eqcuda1445:	equi_miner.cu equi.h blake2b.cu Makefile
 	nvcc -DWN=144 -DWK=5 -arch sm_35 equi_miner.cu blake/blake2b.cpp -o eqcuda1445
 
+eqcuda1927:	equi_miner.cu equi.h blake2b.cu Makefile
+	nvcc -DWN=192 -DWK=7 -arch sm_35 equi_miner.cu blake/blake2b.cpp -o eqcuda1927
+
 verify:	equi.h equi.c Makefile
 	g++ -g equi.c blake/blake2b.cpp -o verify
 

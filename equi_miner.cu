@@ -247,7 +247,6 @@ struct equi {
            orderindices(indices, size) || indices[0] == indices[size];
   }
 
-#if WK == 9
   __device__ bool listindices6(const tree t, u32 *indices) {
     const bucket1 &buck = hta.trees1[2][t.bucketid()];
     const u32 size = 1 << 5;
@@ -276,11 +275,12 @@ struct equi {
            listindices8(buck[t.slotid1()].attr, indices+size) ||
            orderindices(indices, size) || indices[0] == indices[size];
   }
-#endif
   __device__ void candidate(const tree t) {
     proof prf;
 #if WK==9
     if (listindices9(t, prf)) return;
+#elif WK==7
+    if (listindices7(t, prf)) return;
 #elif WK==5
     if (listindices5(t, prf)) return;
 #else
@@ -512,7 +512,7 @@ __global__ void digitO(equi *eq, const u32 r) {
                           | (bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1])) << 4
                   | (xhash = bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
         xhash &= 0xf;
-#elif WN == 144 && BUCKBITS == 20 && RESTBITS == 4
+#elif WN % 24 == 0 && BUCKBITS == 20 && RESTBITS == 4
         xorbucketid = ((((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 8)
                             | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2])) << 4)
                     | (xhash = bytes0[htl.prevbo+3] ^ bytes1[htl.prevbo+3]) >> 4;
@@ -565,7 +565,7 @@ __global__ void digitE(equi *eq, const u32 r) {
         xorbucketid = ((u32)(bytes0[htl.prevbo] ^ bytes1[htl.prevbo]) << 8)
                         | (bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]);
         u32 xhash = (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2]) >> 4;
-#elif WN == 144 && BUCKBITS == 20 && RESTBITS == 4
+#elif WN % 24 == 0 && BUCKBITS == 20 && RESTBITS == 4
         xorbucketid = ((((u32)(bytes0[htl.prevbo+1] ^ bytes1[htl.prevbo+1]) << 8)
                             | (bytes0[htl.prevbo+2] ^ bytes1[htl.prevbo+2])) << 4)
                             | (bytes0[htl.prevbo+3] ^ bytes1[htl.prevbo+3]) >> 4;
