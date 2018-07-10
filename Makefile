@@ -31,6 +31,9 @@ eq4851:	equi.h equi_miner.h equi_miner.cpp Makefile
 eq1445:	equi.h equi_miner.h equi_miner.cpp Makefile
 	$(GPP) -DATOMIC -DRESTBITS=4 -DWN=144 -DWK=5 equi_miner.cpp blake/blake2b.cpp -o eq1445
 
+eq1686:	equi.h equi_miner.h equi_miner.cpp Makefile
+	$(GPP) -DATOMIC -DRESTBITS=4 -DWN=168 -DWK=6 equi_miner.cpp blake/blake2b.cpp -o eq1686
+
 eq1927:	equi.h equi_miner.h equi_miner.cpp Makefile
 	$(GPP) -DATOMIC -DRESTBITS=4 -DWN=192 -DWK=7 equi_miner.cpp blake/blake2b.cpp -o eq1927
 
@@ -69,6 +72,9 @@ verify:	equi.h equi.c Makefile
 
 verify1445:	equi.h equi.c Makefile
 	g++ -DRESTBITS=4 -DWN=144 -DWK=5 -g equi.c blake/blake2b.cpp -o verify1445
+
+verify1686:	equi.h equi.c Makefile
+	g++ -DRESTBITS=4 -DWN=168 -DWK=6 -g equi.c blake/blake2b.cpp -o verify1686
 
 bench:	equi1
 	time ./equi1 -r 10

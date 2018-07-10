@@ -8,8 +8,9 @@
 
 int main(int argc, char **argv) {
   const char *header = "";
-  int nonce = 0, c;
-  while ((c = getopt (argc, argv, "h:n:")) != -1) {
+  char personal[] = "ZcashPoW";
+  int prefixlen, nonce = 0, c;
+  while ((c = getopt (argc, argv, "h:n:p:")) != -1) {
     switch (c) {
       case 'h':
         header = optarg;
@@ -17,10 +18,14 @@ int main(int argc, char **argv) {
       case 'n':
         nonce = atoi(optarg);
         break;
+      case 'p':
+        prefixlen = strlen(optarg);
+        assert(prefixlen <= 8);
+        memcpy((void *)personal, optarg, prefixlen);
     }
   }
-  printf("Verifying size %d proof for equi(\"%s\",%d)\n",
-               PROOFSIZE, header, nonce);
+  printf("Verifying size %d proof for %s(\"%s\",%d)\n",
+               PROOFSIZE, personal, header, nonce);
   char headernonce[HEADERNONCELEN];
   u32 hdrlen = strlen(header);
   memcpy(headernonce, header, hdrlen);
@@ -32,7 +37,7 @@ int main(int argc, char **argv) {
       int nscan = scanf(" %x", &indices[n]);
       assert(nscan == 1);
     }
-    int pow_rc = verify(indices, headernonce, sizeof(headernonce));
+    int pow_rc = verify(indices, headernonce, sizeof(headernonce), personal);
     if (pow_rc == POW_OK)
       printf("Verified\n");
     else

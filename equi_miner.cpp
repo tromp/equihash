@@ -43,14 +43,20 @@ int main(int argc, char **argv) {
   bool compress_sol = false;
   const char *header = "";
   const char *hex = "";
-  int c;
-  while ((c = getopt (argc, argv, "h:n:r:t:x:sc")) != -1) {
+  char personal[] = "ZcashPoW";
+  int prefixlen, c;
+  while ((c = getopt (argc, argv, "h:n:p:r:t:x:sc")) != -1) {
     switch (c) {
       case 'h':
         header = optarg;
         break;
       case 'n':
         nonce = atoi(optarg);
+        break;
+      case 'p':
+        prefixlen = strlen(optarg);
+        assert(prefixlen <= 8);
+        memcpy((void *)personal, optarg, prefixlen);
         break;
       case 'r':
         range = atoi(optarg);
@@ -79,7 +85,7 @@ int main(int argc, char **argv) {
 #else
   assert(nthreads==1);
 #endif
-  printf("Looking for wagner-tree on (\"%s\",%d", hex ? "0x..." : header, nonce);
+  printf("Looking for wagner-tree on %s(\"%s\",%d", personal, hex ? "0x..." : header, nonce);
   if (range > 1)
     printf("-%d", nonce+range-1);
   printf(") with %d %d-bit digits and %d threads\n", NDIGITS, DIGITBITS, nthreads);
@@ -103,7 +109,7 @@ int main(int argc, char **argv) {
   }
   for (int r = 0; r < range; r++) {
     ((u32 *)headernonce)[27] = htole32(nonce+r);
-    eq.setheadernonce(headernonce, sizeof(headernonce));
+    eq.setheadernonce(headernonce, sizeof(headernonce), personal);
     for (int t = 0; t < nthreads; t++) {
       threads[t].id = t;
       threads[t].eq = &eq;

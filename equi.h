@@ -42,12 +42,13 @@ static const u32 HASHOUT = HASHESPERBLAKE*WN/8;
 
 typedef u32 proof[PROOFSIZE];
 
-void setheader(blake2b_state *ctx, const char *headernonce) {
+void setheader(blake2b_state *ctx, const char *headernonce, const char *personal) {
+  char personals[16];
+  memcpy(personals+ 0, personal, 8);
   uint32_t le_N = htole32(WN);
+  memcpy(personals+ 8, &le_N, 4);
   uint32_t le_K = htole32(WK);
-  uchar personal[] = "ZcashPoW01230123";
-  memcpy(personal+8,  &le_N, 4);
-  memcpy(personal+12, &le_K, 4);
+  memcpy(personals+12, &le_K, 4);
   blake2b_param P[1];
   P->digest_length = HASHOUT;
   P->key_length    = 0;
@@ -59,7 +60,7 @@ void setheader(blake2b_state *ctx, const char *headernonce) {
   P->inner_length  = 0;
   memset(P->reserved, 0, sizeof(P->reserved));
   memset(P->salt,     0, sizeof(P->salt));
-  memcpy(P->personal, (const uint8_t *)personal, 16);
+  memcpy(P->personal, (const uint8_t *)personals, 16);
   blake2b_init_param(ctx, P);
   blake2b_update(ctx, (const uchar *)headernonce, HEADERNONCELEN);
 }
@@ -118,13 +119,13 @@ bool duped(proof prf) {
 }
 
 // verify Wagner conditions
-int verify(u32 indices[PROOFSIZE], const char *headernonce, const u32 headerlen) {
+int verify(u32 indices[PROOFSIZE], const char *headernonce, const u32 headerlen, const char *personal) {
   if (headerlen != HEADERNONCELEN)
     return POW_HEADER_LENGTH;
   if (duped(indices))
     return POW_DUPLICATE;
   blake2b_state ctx;
-  setheader(&ctx, headernonce);
+  setheader(&ctx, headernonce, personal);
   uchar hash[WN/8];
   return verifyrec(&ctx, indices, hash, WK);
 }

@@ -370,14 +370,14 @@ struct equi {
     free(sols);
   }
   // prepare blake2b midstate for new run and initialize counters
-  void setheadernonce(const char *headernonce, const u32 len) {
+  void setheadernonce(const char *headernonce, const u32 len, const char *personalprefix = 0) {
 #ifdef ASM_BLAKE
     alignas(8) uchar alignheader[HEADERNONCELEN];
     memcpy(alignheader, headernonce, len);
     assert(len == HEADERNONCELEN);
     Blake2PrepareMidstate4(&blake_ctx, alignheader);
 #else
-    setheader(&blake_ctx, headernonce);
+    setheader(&blake_ctx, headernonce, personalprefix);
 #endif
     nsols = bfull = hfull = 0;
   }
