@@ -9,6 +9,7 @@ only suitable for single-threaded use (where they get some speedup over the gene
 Options -h HEADER -n NONCE are self explanatory.
 Non-ascii headers can be provided in hexadecimal with option -x HEXHEADER.
 Add option -r RANGESIZE to search a range of nonces.
+Add option -p PREFIX to change intial characters of the personalization string (not implemented in assembly and CUDA solvers).
 For benching, options -n 255 -r 100 are useful as it gets exactly 188 solutions from 100 runs.
 Finally, option -s shows the solutions.
 
