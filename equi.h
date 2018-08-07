@@ -50,16 +50,18 @@ void setheader(blake2b_state *ctx, const char *headernonce, const char *personal
   uint32_t le_K = htole32(WK);
   memcpy(personals+12, &le_K, 4);
   blake2b_param P[1];
+  memset(P, 0, sizeof(blake2b_param)); // handle 0 initialized field as commented out below
   P->digest_length = HASHOUT;
-  P->key_length    = 0;
+  // P->key_length    = 0;
   P->fanout        = 1;
   P->depth         = 1;
-  P->leaf_length   = 0;
-  P->node_offset   = 0;
-  P->node_depth    = 0;
-  P->inner_length  = 0;
-  memset(P->reserved, 0, sizeof(P->reserved));
-  memset(P->salt,     0, sizeof(P->salt));
+  // P->leaf_length   = 0;
+  // P->node_offset   = 0;
+  // P->xof_length    = 0; // only appears in non-SSE version of blake2b
+  // P->node_depth    = 0;
+  // P->inner_length  = 0;
+  // memset(P->reserved, 0, sizeof(P->reserved));
+  // memset(P->salt,     0, sizeof(P->salt));
   memcpy(P->personal, (const uint8_t *)personals, 16);
   blake2b_init_param(ctx, P);
   blake2b_update(ctx, (const uchar *)headernonce, HEADERNONCELEN);
