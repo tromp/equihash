@@ -7,7 +7,7 @@
 int main(int argc, char **argv) {
   int nthreads = 1;
   int nonce = 0;
-  int range = 1;
+  int r = 1;
   bool showsol = false;
   const char *header = "";
   int c;
@@ -20,7 +20,7 @@ int main(int argc, char **argv) {
         nonce = atoi(optarg);
         break;
       case 'r':
-        range = atoi(optarg);
+        r = atoi(optarg);
         break;
       case 's':
         showsol = true;
@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
   assert(nthreads==1);
 #endif
   printf("Looking for wagner-tree on (\"%s\",%d", header, nonce);
-  if (range > 1)
+  if (r > 1)
     printf("-%d", nonce+range-1);
   printf(") with %d %d-bit digits and %d threads\n", NDIGITS, DIGITBITS, nthreads);
   thread_ctx *threads = (thread_ctx *)calloc(nthreads, sizeof(thread_ctx));
